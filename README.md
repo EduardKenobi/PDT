@@ -1,0 +1,115 @@
+# Portfolio Tracker & Analyzer
+
+## Description
+
+This project is a comprehensive command-line tool for tracking and analyzing a stock portfolio. It parses transaction and dividend data from Excel files, calculates a wide range of performance metrics, and provides detailed tax analysis for capital gains and dividends based on Czech tax regulations.
+
+## Features
+
+- **Excel Parsing:** Automatically parses transaction, dividend, and cash operation data from Excel files.
+- **Portfolio Analysis:** Calculates key metrics for the entire portfolio and individual tickers, including:
+  - Realized and Unrealized Profit/Loss
+  - Cost Basis (Total and Per-Currency)
+  - Market Value
+  - PADI (Projected Annual Dividend Income)
+  - Dividend Yield and Yield on Cost
+- **Dividend Metrics:** In-depth dividend analysis including:
+  - TTM, 3Y, 5Y, and 10Y Dividend Growth (CAGR)
+  - 5-Year Average Dividend Yield
+- **Tax Analysis (Czech Republic):**
+  - **Capital Gains:** Performs gross analysis for income limit checks and net analysis for the final tax base, applying the statutory time test.
+  - **Dividends:** Calculates Czech tax liability on foreign dividends, accounting for double-taxation treaties, tax credits, and reclaimable amounts from source countries.
+- **Data Output:** Generates a detailed `stock_analysis_output.json` file containing all calculated data. A separate script provides comprehensive summaries printed to the console.
+
+## Project Structure
+
+```
+/
+├── app/                # Contains the main analysis logic
+│   ├── stock_analyzer.py # Main portfolio analysis script
+│   └── taxes/            # Tax calculation logic
+│       ├── tax.py
+│       └── tax_config.py
+├── config.py           # Main project configuration (e.g., primary currency)
+├── data/               # For all input and output data files (.xlsx, .yaml, .json)
+├── parser/             # Scripts for parsing input files
+│   └── excel_parser.py
+├── utils/              # Shared utility functions (e.g., data loaders, API fetchers)
+├── run_parser.py       # Centralized script to run the data parser
+├── run_reporter.py     # Script to generate and print console reports
+└── requirements.txt    # Project dependencies
+```
+
+## Setup and Installation
+
+1.  **Clone the repository:**
+    ```sh
+    git clone <repository-url>
+    cd Tracker
+    ```
+
+2.  **Create and activate a virtual environment (recommended):**
+    ```sh
+    python -m venv venv
+    # On Windows
+    venv\Scripts\activate
+    # On macOS/Linux
+    source venv/bin/activate
+    ```
+
+3.  **Install dependencies:**
+    ```sh
+    pip install -r requirements.txt
+    ```
+
+## Configuration
+
+Before running the scripts, configure the following files to match your data:
+
+1.  **`config.py`**:
+    -   Set the `PRIMARY_CURRENCY` for all final calculations (e.g., 'EUR', 'USD').
+
+2.  **`data/` directory**:
+    -   Place your broker's Excel export files here. The project is configured to look for specific account files (e.g., `account_1931741.xlsx`). You must update the paths in `parser/config/excel_parser_config.py` to match your filenames.
+
+3.  **`data/ticker_map.yaml`**:
+    -   **`ticker_rename`**: Use this to standardize ticker symbols if they differ between data sources.
+    -   **`ticker_info`**: Add metadata for each ticker, such as its `country` and `div_frequency`.
+    -   **`country_info`**: Define country-specific data like `currency` and `tax_treaty` percentage.
+
+4.  **`app/taxes/tax_config.py`**:
+    -   Review and update tax rates (`CZECH_INCOME_TAX_RATE`, `CZECH_DIVIDEND_TAX_RATE`) and income limits (`CZECH_CP_BRUTTO_INCOME_LIMIT`) if they change.
+
+## Usage
+
+The scripts should be run as modules from the project's root directory to ensure imports work correctly.
+
+1.  **Parse Input Files:**
+    Run the new, centralized parser script. This script uses the parser factory to process your raw data into a standardized YAML format.
+    ```sh
+    python run_parser.py
+    ```
+
+2.  **Run the Main Portfolio Analysis:**
+    This script performs all portfolio calculations and generates the `stock_analysis_output.json` file. It does not produce console output.
+    ```sh
+    python -m app.stock_analyzer
+    ```
+
+3.  **Generate Console Report:**
+    This script loads the data from `stock_analysis_output.json` and prints the formatted summary tables to the console.
+    ```sh
+    python run_reporter.py
+    ```
+
+4.  **Run the Tax Analysis:**
+    This script focuses specifically on generating the tax summaries for capital gains and dividends.
+    ```sh
+    python -m app.taxes.tax
+    ```
+
+## Output
+
+-   **Console:** The `run_reporter.py` and `app.taxes.tax` scripts print formatted summary tables directly to the console.
+-   **`data/stock_analysis_output.json`**: A detailed JSON file containing all raw and calculated data for your portfolio and individual tickers.
+-   **`data/*.yaml`**: Intermediate YAML files generated by the parser, used as a data source for the analysis scripts.
