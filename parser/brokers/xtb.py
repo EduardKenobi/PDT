@@ -137,7 +137,7 @@ def _setup_df_and_currency(input_path, sheet_name, currency_row, currency_col, h
     
     return df, currency
 
-def _parse_positions(input_path, sheet_name, mandatory_columns, currency_row, currency_col, position_type, ticker_map):
+def _parse_positions(input_path, sheet_name, mandatory_columns, currency_row, currency_col, position_type):
     """
     Parses the specified sheet from an Excel file and extracts transaction data.
     """
@@ -152,7 +152,7 @@ def _parse_positions(input_path, sheet_name, mandatory_columns, currency_row, cu
         if not original_ticker or pd.isna(original_ticker):
             continue
 
-        ticker = convert_ticker(original_ticker, ticker_map)
+        ticker = convert_ticker(original_ticker)
         transaction = _process_row_to_transaction(ticker, row, currency, position_type)
 
         if ticker not in companies:
@@ -161,7 +161,7 @@ def _parse_positions(input_path, sheet_name, mandatory_columns, currency_row, cu
 
     return {'companies': companies}
 
-def get_transactions_from_excel_files(accounts, ticker_map):
+def get_transactions_from_excel_files(accounts):
     """
     Reads and merges transactions from multiple Excel files.
     """
@@ -169,11 +169,11 @@ def get_transactions_from_excel_files(accounts, ticker_map):
     for account in accounts:
         sheet_name = find_open_position_sheet(account)
         if sheet_name:
-            open_data = _parse_positions(account, sheet_name, OPN_COLUMNS_MANDATORY, OPN_ROW_INDEX_CURRENCY, OPN_COL_INDEX_CURRENCY, 'open', ticker_map)
+            open_data = _parse_positions(account, sheet_name, OPN_COLUMNS_MANDATORY, OPN_ROW_INDEX_CURRENCY, OPN_COL_INDEX_CURRENCY, 'open')
             if open_data:
                 merged_data = merge_data(merged_data, open_data)
 
-        closed_data = _parse_positions(account, CLSD_POSITION_SHEET, CLSD_COLUMNS_MANDATORY, CLSD_ROW_INDEX_CURRENCY, CLSD_COL_INDEX_CURRENCY, 'closed', ticker_map)
+        closed_data = _parse_positions(account, CLSD_POSITION_SHEET, CLSD_COLUMNS_MANDATORY, CLSD_ROW_INDEX_CURRENCY, CLSD_COL_INDEX_CURRENCY, 'closed')
         if closed_data:
             merged_data = merge_data(merged_data, closed_data)
 
@@ -212,7 +212,7 @@ def _process_dividend_row(df, df_iter, index, row, currency):
 
     return dividend_transaction
 
-def _parse_cash_operations(input_path, sheet_name, mandatory_columns, ticker_map):
+def _parse_cash_operations(input_path, sheet_name, mandatory_columns):
     """ 
     Parses cash operations from the specified sheet in an Excel file.
     """ 
@@ -244,7 +244,7 @@ def _parse_cash_operations(input_path, sheet_name, mandatory_columns, ticker_map
                 if not original_ticker or pd.isna(original_ticker):
                     continue
 
-                ticker = convert_ticker(original_ticker, ticker_map)
+                ticker = convert_ticker(original_ticker)
                 dividend_transaction = _process_dividend_row(df, df_iter, index, row, currency)
 
                 if ticker not in companies:
@@ -269,13 +269,13 @@ def _parse_cash_operations(input_path, sheet_name, mandatory_columns, ticker_map
 
     return {'companies': companies, 'other_operations': other_operations}
 
-def get_cash_operations_from_excel_files(accounts, ticker_map):
+def get_cash_operations_from_excel_files(accounts):
     """
     Reads and merges cash operations from multiple Excel files.
     """
     merged_data = {'companies': {}, 'other_operations': []}
     for account in accounts:
-        cash_op_data = _parse_cash_operations(account, CASH_OPERATION_SHEET, CASH_OPERATION_COLUMNS_MANDATORY, ticker_map)
+        cash_op_data = _parse_cash_operations(account, CASH_OPERATION_SHEET, CASH_OPERATION_COLUMNS_MANDATORY)
 
         if cash_op_data:
             for ticker, data in cash_op_data['companies'].items():
