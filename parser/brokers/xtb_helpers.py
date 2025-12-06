@@ -1,5 +1,6 @@
 import pandas as pd
 import openpyxl
+from .xtb_ticker_converter import find_yahoo_ticker, get_ticker_cache
 from .xtb_config import (
     OPND_POSITION_SHEET,
     OUT_OF_RANGE,
@@ -41,20 +42,17 @@ def parse_excel(input_path, sheet_name):
         raise ValueError(f"Failed to parse Excel file: {e}") from e
     
 
-def convert_ticker(ticker, ticker_map):
+def convert_ticker(ticker):
     """
-    Converts a ticker symbol using a provided mapping.
+    Converts an XTB ticker to a Yahoo Finance ticker using an automatic
+    finder with a caching mechanism.
     Args:
-        ticker (str): The ticker symbol to convert.
-        ticker_map (dict): A dictionary mapping old tickers to new tickers.
+        ticker (str): The XTB ticker symbol to convert (e.g., 'TSLA.US').
     Returns:
-        str: The converted ticker symbol, or the original ticker if not found in the map.
+        str: The converted Yahoo Finance ticker symbol.
     """
-    if ticker in ticker_map:
-        return ticker_map[ticker]
-    else:
-        print(f"Warning: Ticker '{ticker}' not found in the ticker map. Using original ticker.")
-        return ticker  # Return the original ticker if not found in the map
+    # Use the automatic finder which handles its own lazy-loading cache.
+    return find_yahoo_ticker(ticker, get_ticker_cache())
     
 
 def get_currency(df, row_index, col_index):
