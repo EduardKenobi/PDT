@@ -77,7 +77,20 @@ def _process_row_to_transaction(ticker, row, currency, position_type):
             float(row.get('Sale value')) if not pd.isna(row.get('Sale value')) else (None if pd.isna(row.get('Margin')) or pd.isna(row.get('Gross P/L')) else float(row.get('Margin') + row.get('Gross P/L')))
         )
         gross_pl_amount = float(row.get('Gross P/L')) if not pd.isna(row.get('Gross P/L')) else None
-        purchase_value = handle_possible_split(ticker, row.get('Position'), transaction['purchase_value'], sale_value, gross_pl_amount, transaction['shares'])
+
+        comment = row.get('Close origin')
+        
+        is_correction = False
+        recalculated_profit = None
+        if gross_pl_amount == 0.0:
+            if isinstance(comment, str) and 'correction' in comment.lower():
+                is_correction = True
+                recalculated_profit = sale_value - purchase_value
+                print(f"Warning: Detected broker correction for position {transaction['position']} of ticker {ticker}. A recalculated profit of {recalculated_profit:.2f} will be used for tax calculation.")
+                
+        if not is_correction:
+            purchase_value = handle_possible_split(ticker, row.get('Position'), transaction['purchase_value'], sale_value, gross_pl_amount, transaction['shares'])
+
         transaction.update({
             'purchase_value': purchase_value,
         })
@@ -86,9 +99,10 @@ def _process_row_to_transaction(ticker, row, currency, position_type):
             'close_price': float(row.get('Close price')) if not pd.isna(row.get('Close price')) else None,
             'sale_value': sale_value,
             'gross_pl_amount': gross_pl_amount,
+            'recalculated_profit': recalculated_profit,
             'gross_pl_percent': (
                 gross_pl_amount / purchase_value
-                if purchase_value is not None and not pd.isna(gross_pl_amount)
+                if purchase_value is not None and purchase_value != 0 and not pd.isna(gross_pl_amount)
                 else None
             ),
         })
@@ -176,6 +190,27 @@ def get_transactions_from_excel_files(accounts):
         closed_data = _parse_positions(account, CLSD_POSITION_SHEET, CLSD_COLUMNS_MANDATORY, CLSD_ROW_INDEX_CURRENCY, CLSD_COL_INDEX_CURRENCY, 'closed')
         if closed_data:
             merged_data = merge_data(merged_data, closed_data)
+
+    # Handle positions that are both open and closed in the same report
+    for ticker, company_data in merged_data['companies'].items():
+        if 'transactions' not in company_data:
+            continue
+
+        transactions = company_data['transactions']
+        closed_position_ids = {t['position'] for t in transactions if t['type'] == 'closed'}
+        
+        final_transactions = []
+        for t in transactions:
+            is_open = t['type'] == 'open'
+            position_id = t['position']
+            
+            if is_open and position_id in closed_position_ids:
+                print(f"Warning: Position {position_id} for ticker {ticker} is closed in the same report. Removing the open position entry.")
+                continue
+            
+            final_transactions.append(t)
+        
+        company_data['transactions'] = final_transactions
 
     for ticker in merged_data['companies']:
         if 'transactions' in merged_data['companies'][ticker]:

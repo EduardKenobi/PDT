@@ -134,6 +134,8 @@ def calculate_ticker_metrics(ticker, transactions_df, dividends_data, ticker_inf
 
     country = ticker_info.get(ticker, {}).get('country')
     price_currency = country_info.get(country, {}).get('currency', '')
+    if not price_currency:
+        print(f"Warning: Could not determine price currency for ticker '{ticker}'. Market value will be zero. Please check 'ticker_map.yaml'.")
     current_shares = sum_shares(open_positions)
 
     closed_positions_details, ticker_realized_gain, ticker_cost_of_closed = process_closed_positions(closed_positions, exchange_rate_cache, price_currency)
