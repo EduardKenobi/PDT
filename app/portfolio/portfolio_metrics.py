@@ -41,8 +41,9 @@ def get_cash_operations_summary(exchange_rate_cache: dict) -> tuple[float, datet
     operations = cash_operations_data.get('other_operations', [])
 
     for op in operations:
-        op_type = op.get('type')
-        if op_type in ['deposit', 'withdrawal']:
+        # Use the user-defined category for calculation
+        category = op.get('user_category')
+        if category in ['deposit', 'withdrawal']:
             amount = op.get('amount', 0)
             currency = op.get('currency')
             date_str = op.get('date')

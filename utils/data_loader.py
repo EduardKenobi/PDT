@@ -7,7 +7,8 @@ from config import (
     DIVIDEND_OUTPUT_FILE, 
     TICKER_MAP_FILE, 
     CASH_OPERATIONS_OUTPUT_FILE,
-    MARKET_DATA_OUTPUT
+    MARKET_DATA_OUTPUT,
+    CASH_FLOW_CATEGORIZATION_FILE
 )
 
 def convert_df_columns_to_numeric(df, columns):
@@ -30,11 +31,20 @@ def load_yaml(file_path):
         with open(file_path, 'r', encoding='utf-8') as stream:
             return yaml.safe_load(stream)
     except FileNotFoundError:
-        print(f"Error: The file {file_path} was not found.")
+        # This is expected on the first run, so just return None.
         return None
     except yaml.YAMLError as exc:
         print(f"Error parsing YAML file: {exc}")
         return None
+
+def load_categorizations():
+    """
+    Loads cash flow categorizations from the YAML file.
+    Returns a dictionary of categorizations or an empty dict if not found.
+    """
+    categorizations = load_yaml(CASH_FLOW_CATEGORIZATION_FILE)
+    return categorizations if categorizations is not None else {}
+
 
 def load_nested_yaml_to_dataframe(yaml_path: str, list_key: str) -> pd.DataFrame:
     """
