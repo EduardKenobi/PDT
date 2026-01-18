@@ -174,28 +174,41 @@ def analyze_closed_positions(transactions_df: pd.DataFrame) -> pd.DataFrame:
     """
     
     # Filter for transactions that are marked as 'closed'.
-    closed_taxable_df = transactions_df[
+    closed_df = transactions_df[
         (transactions_df['type'] == 'closed')
     ].copy()
 
-    if closed_taxable_df.empty:
+    if closed_df.empty:
         print("No relevant closed transactions found for tax purposes.")
         return pd.DataFrame()
 
     # Ensure numeric types for calculation
-    closed_taxable_df['sale_value'] = pd.to_numeric(closed_taxable_df['sale_value'], errors='coerce')
-    closed_taxable_df['purchase_value'] = pd.to_numeric(closed_taxable_df['purchase_value'], errors='coerce')
+    closed_df['sale_value'] = pd.to_numeric(closed_df['sale_value'], errors='coerce')
+    closed_df['purchase_value'] = pd.to_numeric(closed_df['purchase_value'], errors='coerce')
 
-    closed_taxable_df['close_date'] = pd.to_datetime(closed_taxable_df['close_date'])
-    closed_taxable_df['year'] = closed_taxable_df['close_date'].dt.year
+    # Determine profit for each transaction, prioritizing 'recalculated_profit' for special cases.
+    if 'recalculated_profit' in closed_df.columns:
+        # Use np.where for efficiency: if 'recalculated_profit' is not NaN, use it, else calculate.
+        closed_df['profit'] = closed_df['recalculated_profit'].where(
+            pd.notna(closed_df['recalculated_profit']),
+            closed_df['sale_value'] - closed_df['purchase_value']
+        )
+    else:
+        closed_df['profit'] = closed_df['sale_value'] - closed_df['purchase_value']
+    
+    closed_df['profit'] = pd.to_numeric(closed_df['profit'], errors='coerce')
+    
+    closed_df['close_date'] = pd.to_datetime(closed_df['close_date'])
+    closed_df['year'] = closed_df['close_date'].dt.year
 
-    # Group by year and currency to calculate total sales, purchases, and profit.
-    yearly_summary = closed_taxable_df.groupby(['year', 'currency']).agg(
+    # Group by year and currency to calculate total sales and sum the pre-calculated profits.
+    yearly_summary = closed_df.groupby(['year', 'currency']).agg(
         total_sale_value=('sale_value', 'sum'),
-        total_purchase_value=('purchase_value', 'sum')
+        profit=('profit', 'sum')
     ).reset_index()
 
-    yearly_summary['profit'] = yearly_summary['total_sale_value'] - yearly_summary['total_purchase_value']
+    # For reporting consistency, calculate the total purchase value from the sale and profit.
+    yearly_summary['total_purchase_value'] = yearly_summary['total_sale_value'] - yearly_summary['profit']
     
     yearly_summary.rename(columns={
         'year': 'Year',
@@ -204,6 +217,10 @@ def analyze_closed_positions(transactions_df: pd.DataFrame) -> pd.DataFrame:
         'total_purchase_value': 'Total Purchase Value',
         'profit': 'Profit'
     }, inplace=True)
+
+    # Reorder columns for the final report
+    final_columns = ['Year', 'Currency', 'Total Sale Value', 'Total Purchase Value', 'Profit']
+    yearly_summary = yearly_summary.reindex(columns=final_columns)
 
     return yearly_summary
 
@@ -368,6 +385,9 @@ def _enrich_dividend_data(dividends_df: pd.DataFrame, ticker_map_data: dict) -> 
     if 'withholding_tax' not in enriched_df.columns:
         enriched_df['withholding_tax'] = 0
     enriched_df['withholding_tax'] = enriched_df['withholding_tax'].fillna(0)
+
+    # Withholding tax from broker reports is often negative; convert to absolute value for calculations.
+    enriched_df['withholding_tax'] = enriched_df['withholding_tax'].abs()
 
     # --- Tax Calculations ---
     # Max creditable tax is the amount allowed by the double-taxation treaty.
