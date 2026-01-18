@@ -295,7 +295,8 @@ def _parse_cash_operations(input_path, sheet_name, mandatory_columns):
                     'date': date_val.strftime('%Y-%m-%d') if pd.notna(date_val) else None,
                     'amount': float(row.get('Amount')) if not pd.isna(row.get('Amount')) else None,
                     'currency': currency,
-                    'comment': row.get('Comment')
+                    'comment': row.get('Comment'),
+                    'user_category': current_type
                 }
                 other_operations.append(operation)
 

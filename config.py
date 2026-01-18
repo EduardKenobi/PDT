@@ -28,6 +28,7 @@ TICKER_MAP_FILE = os.path.join(DATA_DIR, 'ticker_map.yaml')
 TRANSACTIONS_OUTPUT_FILE = os.path.join(DATA_DIR, 'transactions_excel.yaml')
 DIVIDEND_OUTPUT_FILE = os.path.join(DATA_DIR, 'dividends.yaml')
 CASH_OPERATIONS_OUTPUT_FILE = os.path.join(DATA_DIR, 'cash_operations.yaml')
+CASH_FLOW_CATEGORIZATION_FILE = os.path.join(DATA_DIR, 'cash_flow_categorization.yaml')
 
 # Used by app/stock_analyzer.py
 STOCK_ANALYSIS_OUTPUT = os.path.join(DATA_DIR, 'stock_analysis_output.json')

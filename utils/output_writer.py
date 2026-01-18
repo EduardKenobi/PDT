@@ -1,4 +1,5 @@
 import yaml
+from config import CASH_FLOW_CATEGORIZATION_FILE
 
 def float_representer(dumper, value):
     """
@@ -31,3 +32,9 @@ def save_data_to_yaml(data, filepath):
         print(f"Successfully saved data to {filepath}")
     except IOError as e:
         print(f"Error writing data to {filepath}: {e}")
+
+def save_categorizations(data):
+    """
+    Saves the cash flow categorizations to the specified YAML file.
+    """
+    save_data_to_yaml(data, CASH_FLOW_CATEGORIZATION_FILE)
