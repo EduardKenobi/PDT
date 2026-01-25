@@ -21,6 +21,12 @@ def get_parser_functions(broker_name: str) -> dict:
             "get_transactions": xtb.get_transactions_from_excel_files,
             "get_cash_operations": xtb.get_cash_operations_from_excel_files,
         }
+    elif broker_name.lower() == 'ibkr':
+        from .brokers import ibkr
+        return {
+            "get_transactions": ibkr.get_transactions_from_csv_files,
+            "get_cash_operations": ibkr.get_cash_operations_from_csv_files,
+        }
     # To add a new broker, add an 'elif' block here:
     # elif broker_name.lower() == 'degiro':
     #     from .brokers import degiro

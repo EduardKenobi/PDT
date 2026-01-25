@@ -3,13 +3,13 @@ from datetime import datetime
 from collections import defaultdict
 
 from utils.data_loader import load_yaml
-from config import PRIMARY_CURRENCY, CASH_OPERATIONS_OUTPUT_FILE
+from config import PRIMARY_CURRENCY, CASH_OPERATIONS_OUTPUT_FILE, IBKR_CASH_BALANCE_OUTPUT_FILE
 from utils.exchange_rate import get_rate_from_cache, get_all_currency_exchange_rate_caches
 
-def calculate_free_cash_by_currency(dividends_data: dict, cash_operations_data: dict) -> dict:
+def calculate_free_cash_by_currency(cash_operations_data: dict) -> dict:
     """
-    Calculates the total free cash for each currency by summing up:
-    - Cash operations (deposits, withdrawals, other operations)
+    Calculates the total free cash for XTB for each currency by summing up:
+    - Cash operations (deposits, withdrawals, other operations) - excluding transfers and IBKR operations
     - Dividends received
     """
     free_cash = defaultdict(float)
@@ -17,12 +17,32 @@ def calculate_free_cash_by_currency(dividends_data: dict, cash_operations_data: 
     # Process cash operations
     operations = cash_operations_data.get('other_operations', [])
     for op in operations:
+        # Ignore IBKR operations
+        if op.get('broker') == 'ibkr':
+            continue
+
+        user_category = op.get('user_category', '')
+        # We exclude transfers_in from free cash calculation, otherwise they would double count deposits
+        if 'transfer_in' in user_category:
+            continue
+
         amount = op.get('amount', 0)
         currency = op.get('currency')
         if currency and amount:
             free_cash[currency] += amount
 
     return dict(free_cash)
+
+def get_ibkr_free_cash() -> dict:
+    """
+    Loads the IBKR cash balance from the YAML file.
+    """
+    try:
+        cash_balance_data = load_yaml(IBKR_CASH_BALANCE_OUTPUT_FILE)
+    except FileNotFoundError:
+        print(f"Warning: {IBKR_CASH_BALANCE_OUTPUT_FILE} not found. Cannot load IBKR cash balance.")
+        return {}
+    return cash_balance_data
 
 
 

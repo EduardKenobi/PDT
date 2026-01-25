@@ -11,6 +11,23 @@ from calendar import month_name
 from config import PRIMARY_CURRENCY, EXIT_CODE_RETURN_TO_MENU, CHOICE_EXIT, CHOICE_STOCK_SUMMARY, CHOICE_PORTFOLIO_SUMMARY
 from utils.data_loader import load_analysis_output, load_dividends_data
 
+def _format_free_cash(free_cash_by_currency: Dict) -> str:
+    """Formats the free cash dictionary into a string for display."""
+    parts = []
+    for broker, cash_by_currency in free_cash_by_currency.items():
+        broker_parts = []
+        if broker == 'IBKR':
+            amount = cash_by_currency.get(PRIMARY_CURRENCY, 0)
+            broker_parts.append(f"{amount:+.2f} {PRIMARY_CURRENCY}")
+        else:
+            for currency, amount in cash_by_currency.items():
+                broker_parts.append(f"{amount:+.2f} {currency}")
+        
+        if broker_parts:
+            parts.append(f"{broker}: {' / '.join(broker_parts)}")
+            
+    return ", ".join(parts)
+
 def generate_portfolio_summary_table(portfolio_summary: Dict) -> List[List]:
     """
     Generates the portfolio summary table with Performance and Dividends sections.
@@ -28,7 +45,7 @@ def generate_portfolio_summary_table(portfolio_summary: Dict) -> List[List]:
         ["Total Cost:", f"{portfolio_summary['portfolio_cost']:.2f} {PRIMARY_CURRENCY}"],
         ["Total Value:", f"{portfolio_summary['portfolio_value']:.2f} {PRIMARY_CURRENCY}"],
         ["Total P/L:", f"{portfolio_summary['total_portfolio_profit_loss']:+.2f} {PRIMARY_CURRENCY} ({portfolio_summary['total_return_percentage']:+.2%}, p.a. {portfolio_summary['annualized_return_percentage']:+.2%})"],
-        ["Free Cash:", f"{portfolio_summary['free_cash_by_currency'].get(PRIMARY_CURRENCY, 0):+.2f} {PRIMARY_CURRENCY} / {portfolio_summary['free_cash_by_currency'].get('USD', 0):+.2f} USD"],
+        ["Free Cash:", _format_free_cash(portfolio_summary['free_cash_by_currency'])],
         ["Total Dividends:", f"{portfolio_summary['total_dividends']:.2f} {PRIMARY_CURRENCY} (Tax: {portfolio_summary['total_dividend_tax']:.2f} {PRIMARY_CURRENCY})"],
         ["Realized P/L:", f"{portfolio_summary['realized_pl']:+.2f} {PRIMARY_CURRENCY} ({portfolio_summary['realized_pl_percentage']:+.2%})"],
         ["Unrealized P/L:", f"{portfolio_summary['unrealized_pl']:+.2f} {PRIMARY_CURRENCY} ({portfolio_summary['unrealized_pl_percentage']:+.2%})"]
@@ -210,13 +227,14 @@ def _generate_positions_table(details: Dict, price_currency: str) -> str:
     if not open_positions:
         return ""
 
-    headers = ['Date', 'Shares', 'Price', f'Cost', f'Unrealized Gain']
+    headers = ['Date', 'Shares', 'Price', f'Cost', f'Unrealized Gain', 'Broker']
     positions_data = []
     for p in open_positions:
         date = p.get('date', 'N/A')
         
         # Robust formatting for shares
         shares_val = p.get('shares')
+        broker = p.get('broker', 'N/A')
         try:
             shares_str = f"{float(shares_val):.4f}"
         except (ValueError, TypeError, AttributeError):
@@ -235,7 +253,8 @@ def _generate_positions_table(details: Dict, price_currency: str) -> str:
             shares_str,
             price_str,
             cost_str,
-            unrealized_str
+            unrealized_str,
+            broker
         ])
 
     return tabulate(positions_data, headers=headers, tablefmt="grid", disable_numparse=True)
@@ -279,13 +298,14 @@ def _generate_closed_positions_table(closed_positions: List[Dict], price_currenc
     if not closed_positions:
         return ""
 
-    headers = ['Open / Close Date', 'Shares', 'Open / Close Price', 'Purchase / Sale Value', 'Realized Gain']
+    headers = ['Open / Close Date', 'Shares', 'Open / Close Price', 'Purchase / Sale Value', 'Realized Gain', 'Broker']
     closed_data = []
 
     for p in closed_positions:
         open_date = p.get('open_date', 'N/A')
         close_date = p.get('close_date', 'N/A')
         shares = p.get('shares')
+        broker = p.get('broker', 'N/A')
         open_price = p.get('open_price')
         close_price = p.get('close_price')
         currency = p.get('currency')
@@ -308,7 +328,8 @@ def _generate_closed_positions_table(closed_positions: List[Dict], price_currenc
             shares_str,
             open_close_price_str,
             purchase_sale_value_str,
-            realized_gain_str
+            realized_gain_str,
+            broker
         ])
 
     return tabulate(closed_data, headers=headers, tablefmt="grid", disable_numparse=True)

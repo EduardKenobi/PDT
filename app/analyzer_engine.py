@@ -7,14 +7,14 @@ from typing import Optional, Dict, List, Any, Tuple
 from app.models import DividendGrowthMetrics, TickerData, PortfolioSummary, PositionData, ClosedPositionData
 from config import PRIMARY_CURRENCY
 from utils.stock_calculator import sum_shares, calculate_cost_per_currency
-from utils.data_fetcher import get_forward_dividend_from_yfinance, get_ticker_history
+from utils.data_fetcher import get_forward_dividend_from_yfinance, get_ticker_history, get_currency_from_yfinance
 from app.stock.stock_metrics import (
     calculate_average_dividend_yield, calculate_dividend_growth, 
     calculate_total_dividends, predict_next_dividend_month, 
     get_dividend_payment_months, predict_dividend_income_calendar
 )
 from app.portfolio.portfolio_metrics import (
-    calculate_free_cash_by_currency, get_rate_from_cache, 
+    calculate_free_cash_by_currency, get_ibkr_free_cash, get_rate_from_cache, 
     get_cash_operations_summary, get_other_cash_operations_summary, get_portfolio_dividends_per_year, 
     get_portfolio_dividends_ltm
 )
@@ -66,6 +66,7 @@ def process_closed_positions(closed_positions: pd.DataFrame, exchange_rate_cache
                 open_price=pos['open_price'],
                 close_price=pos['close_price'],
                 currency=pos['currency'],
+                broker=pos['broker'],
                 purchase_value=pos['purchase_value'],
                 sale_value=pos['sale_value'],
                 realized_gain_amount=realized_gain_lot_primary,
@@ -103,6 +104,7 @@ def process_open_positions(open_positions: pd.DataFrame, current_price: float, p
         open_positions_details.append(
             PositionData(
                 date=pos['open_date'],
+                broker=pos['broker'],
                 shares=pos['shares'],
                 price=pos['open_price'],
                 value=pos['purchase_value'],
@@ -134,6 +136,8 @@ def calculate_ticker_metrics(ticker, transactions_df, dividends_data, ticker_inf
 
     country = ticker_info.get(ticker, {}).get('country')
     price_currency = country_info.get(country, {}).get('currency', '')
+    if not price_currency:
+        price_currency = get_currency_from_yfinance(ticker)
     if not price_currency:
         print(f"Warning: Could not determine price currency for ticker '{ticker}'. Market value will be zero. Please check 'ticker_map.yaml'.")
     current_shares = sum_shares(open_positions)
@@ -232,15 +236,22 @@ def calculate_portfolio_summary(all_tickers_data: Dict[str, TickerData], transac
     realized_pl = sum(d.realized_gain_primary_currency for d in all_tickers_data.values())
     cost_of_closed_positions = sum(d.cost_of_closed_positions for d in all_tickers_data.values())
 
-    free_cash_by_currency = calculate_free_cash_by_currency(dividends_data, cash_operations_data)
+    xtb_free_cash = calculate_free_cash_by_currency(cash_operations_data)
+    ibkr_free_cash = get_ibkr_free_cash()
+    free_cash_by_currency = {
+        'XTB': xtb_free_cash,
+        'IBKR': ibkr_free_cash
+    }
+
     total_free_cash_primary = 0.0
-    for currency, amount in free_cash_by_currency.items():
-        if currency == PRIMARY_CURRENCY:
-            total_free_cash_primary += amount
-        else:
-            rate = get_rate_from_cache(exchange_rate_cache, currency, PRIMARY_CURRENCY, today.strftime('%Y-%m-%d'))
-            if rate:
-                total_free_cash_primary += amount * rate
+    for broker, cash_by_currency in free_cash_by_currency.items():
+        for currency, amount in cash_by_currency.items():
+            if currency == PRIMARY_CURRENCY:
+                total_free_cash_primary += amount
+            else:
+                rate = get_rate_from_cache(exchange_rate_cache, currency, PRIMARY_CURRENCY, today.strftime('%Y-%m-%d'))
+                if rate:
+                    total_free_cash_primary += amount * rate
 
     portfolio_value = portfolio_cost + unrealized_pl + total_free_cash_primary
     net_capital_contributed, first_cash_op_date = get_cash_operations_summary(exchange_rate_cache)
