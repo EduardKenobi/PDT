@@ -18,6 +18,7 @@ class PositionData:
     cost_basis_primary_currency: float
     unrealized_gain_perc: float
     unrealized_gain_value: float
+    broker: str
 
 @dataclass
 class ClosedPositionData:
@@ -31,6 +32,7 @@ class ClosedPositionData:
     sale_value: float
     realized_gain_amount: float
     realized_gain_percentage: float
+    broker: str
 
 @dataclass
 class TickerData:

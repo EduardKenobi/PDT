@@ -118,3 +118,23 @@ def get_ticker_history(ticker: str, period: str = "max") -> pd.DataFrame:
         print(f"Error fetching historical data for {ticker}: {e}")
         return pd.DataFrame()
 
+def get_currency_from_yfinance(ticker: str) -> str:
+    """
+    Gets the currency from yfinance for a given ticker.
+
+    Args:
+        ticker (str): The ticker symbol.
+
+    Returns:
+        str: The currency code (e.g., 'USD', 'EUR'), or empty string if not available.
+    """
+    try:
+        stock = yf.Ticker(ticker)
+        currency = stock.info.get('currency')
+        if currency:
+            return currency.upper()
+        return ''
+    except Exception as e:
+        print(f"Error fetching currency for {ticker}: {e}")
+        return ''
+

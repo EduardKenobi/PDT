@@ -70,6 +70,7 @@ def _process_row_to_transaction(ticker, row, currency, position_type):
         'open_price': float(row.get('Open price')) if not pd.isna(row.get('Open price')) else None,
         'purchase_value': None if pd.isna(purchase_value) else purchase_value,
         'currency': currency,
+        'broker': 'xtb',
     }
 
     if position_type == 'closed':

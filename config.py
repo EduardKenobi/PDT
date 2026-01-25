@@ -18,9 +18,16 @@ CHOICE_RUN_TAXER = 'Run Taxer'
 
 
 # --- Input Files ---
+# XTB
 EUR_ACCOUNT_FILE = os.path.join(DATA_DIR, 'account_1931741.xlsx')
 USD_ACCOUNT_FILE = os.path.join(DATA_DIR, 'account_50557805.xlsx')
-ACCOUNTS = [EUR_ACCOUNT_FILE, USD_ACCOUNT_FILE]
+XTB_ACCOUNTS = [EUR_ACCOUNT_FILE, USD_ACCOUNT_FILE]
+
+# IBKR (Please update the filename to match your CSV export)
+IBKR_ACCOUNT_FILE = os.path.join(DATA_DIR, 'U23432040.csv') 
+IBKR_ACCOUNTS = [IBKR_ACCOUNT_FILE]
+
+ACCOUNTS = XTB_ACCOUNTS  # This can be changed to IBKR_ACCOUNTS to switch parsers
 TICKER_MAP_FILE = os.path.join(DATA_DIR, 'ticker_map.yaml')
 
 # --- Output File Paths ---
@@ -29,6 +36,7 @@ TRANSACTIONS_OUTPUT_FILE = os.path.join(DATA_DIR, 'transactions_excel.yaml')
 DIVIDEND_OUTPUT_FILE = os.path.join(DATA_DIR, 'dividends.yaml')
 CASH_OPERATIONS_OUTPUT_FILE = os.path.join(DATA_DIR, 'cash_operations.yaml')
 CASH_FLOW_CATEGORIZATION_FILE = os.path.join(DATA_DIR, 'cash_flow_categorization.yaml')
+IBKR_CASH_BALANCE_OUTPUT_FILE = os.path.join(DATA_DIR, 'ibkr_cash_balance.yaml')
 
 # Used by app/stock_analyzer.py
 STOCK_ANALYSIS_OUTPUT = os.path.join(DATA_DIR, 'stock_analysis_output.json')
@@ -38,7 +46,7 @@ TAX_ANALYSIS_OUTPUT = os.path.join(DATA_DIR, 'tax_analysis_output.json')
 MARKET_DATA_OUTPUT = os.path.join(DATA_DIR, 'market_data.json')
 
 
-# --- Ticker Conversion (XTB) ---
+# --- Ticker Conversion ---
 XTB_TICKER_CACHE_PATH = os.path.join(DATA_DIR, 'xtb_ticker_cache.json')
 XTB_MARKET_MAP = {
     'US': '',    # US stocks often have no suffix
@@ -61,4 +69,20 @@ XTB_MARKET_MAP = {
 XTB_SPECIAL_TICKER_MAP = {
     'GOLD': 'GC=F',
     'EU50': '^STOXX50E',
+}
+
+IBKR_TICKER_CACHE_PATH = os.path.join(DATA_DIR, 'ibkr_ticker_cache.json')
+IBKR_SPECIAL_TICKER_MAP = {}
+IBKR_EXCHANGE_MAP = {
+    'NASDAQ': '',
+    'NYSE': '',
+    'ARCA': '',
+    'AMEX': '',
+    'LSE': '.L',
+    'AEB': '.AS', # Amsterdam
+    'SFB': '.ST', # Stockholm
+    # Add other exchanges as needed
+    # 'FWB': '.F',  # Frankfurt
+    # 'XETRA': '.DE',
+    # 'TSE': '.TO', # Toronto
 }
