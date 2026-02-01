@@ -2,6 +2,7 @@ import yaml
 import pandas as pd
 import json
 import ast
+import os
 from config import (
     TRANSACTIONS_OUTPUT_FILE, 
     DIVIDEND_OUTPUT_FILE, 
@@ -132,51 +133,29 @@ def rehydrate_data(data):
                 new_dict[k] = rehydrate_data(v)
         return new_dict
     if isinstance(data, list):
-        # Heuristic: if a list contains dicts with 'Date' and 'Rate', assume it's a currency DataFrame
-        if data and all(isinstance(i, dict) for i in data) and 'Date' in data[0] and 'Rate' in data[0]:
-            return pd.DataFrame(data)
+        # Heuristic: if a list contains dicts with 'Date'/'index' and 'Close'/'Rate', assume it's a DataFrame
+        if data and all(isinstance(i, dict) for i in data):
+            keys = data[0].keys()
+            has_date = 'Date' in keys or 'index' in keys
+            has_value = any(k in keys for k in ['Rate', 'Close', 'Adj Close'])
+            if has_date and has_value:
+                return pd.DataFrame(data)
         return [rehydrate_data(item) for item in data]
     return data
 
-def load_market_data():
-
-    """
-
-    Load pre-fetched market data from JSON file, converting rate data back to DataFrames.
-
-    """
-
+def load_market_data() -> dict:
+    """Loads and rehydrates the market data cache from JSON."""
+    if not os.path.exists(MARKET_DATA_OUTPUT):
+        print(f"Warning: {MARKET_DATA_OUTPUT} not found. Run 'update_market_data.py' first.")
+        return {}
+    
     try:
-
         with open(MARKET_DATA_OUTPUT, 'r') as f:
-
-            market_data = json.load(f)
-
-        print("Market data loaded successfully.")
-
-
-
-        # Recursively rehydrate the entire data structure
-
-        rehydrated_data = rehydrate_data(market_data)
-
-
-
-        return rehydrated_data.get('current_prices', {}), rehydrated_data.get('exchange_rate_cache', {})
-
-    except FileNotFoundError:
-
-        print(f"Error: Market data file not found at {MARKET_DATA_OUTPUT}.")
-
-        print("Please run the 'Update Market Data' option from the main menu first.")
-
-        return None, None
-
-    except json.JSONDecodeError:
-
-        print(f"Error: Could not decode JSON from {MARKET_DATA_OUTPUT}.")
-
-        return None, None
+            data = json.load(f)
+        return rehydrate_data(data)
+    except Exception as e:
+        print(f"Error loading market data: {e}")
+        return {}
 
 
 

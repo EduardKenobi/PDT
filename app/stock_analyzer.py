@@ -36,15 +36,17 @@ def main():
         print("Could not load data. Exiting.")
         return
 
-    current_prices, exchange_rate_cache = load_market_data()
-    if current_prices is None:
+    market_data = load_market_data()
+    if not market_data:
+        print("Error: Market data cache is empty. Please run Updater first.")
         return
 
     all_tickers = prepare_data(transactions_df)
     
-    all_tickers_data = process_all_tickers(transactions_df, dividends_data, ticker_map_data, all_tickers, current_prices, exchange_rate_cache)
+    # Process using cache
+    all_tickers_data = process_all_tickers(transactions_df, dividends_data, ticker_map_data, all_tickers, market_data)
 
-    portfolio_summary = calculate_portfolio_summary(all_tickers_data, transactions_df, dividends_data, cash_operations_data, exchange_rate_cache)
+    portfolio_summary = calculate_portfolio_summary(all_tickers_data, transactions_df, dividends_data, cash_operations_data, market_data.get('exchange_rate_cache', {}))
 
     all_tickers_data = enrich_ticker_data(all_tickers_data, portfolio_summary)
 

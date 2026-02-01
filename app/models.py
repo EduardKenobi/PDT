@@ -52,17 +52,19 @@ class TickerData:
     total_profit_loss_percentage: float
     padi: float
     forward_dividend: float
-    current_price: Optional[float]
-    price_currency: Optional[str]
-    country: Optional[str]
+    current_price: float
+    price_currency: str
+    country: str
     dividend_yield: float
     yield_on_cost: float
     average_dividend_yield_5y: float
     dividend_growth: DividendGrowthMetrics
     open_positions: List[PositionData]
-    closed_positions: List[ClosedPositionData] = field(default_factory=list)
+    closed_positions: List[ClosedPositionData]
     ratio_on_cost: float = 0.0
     ratio_on_padi: float = 0.0
+    name: Optional[str] = None
+    sector: Optional[str] = None
     next_dividend_month: Optional[str] = None
     dividend_payment_months: Optional[List[int]] = None
     div_frequency: Optional[str] = None

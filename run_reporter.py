@@ -1,15 +1,20 @@
 import json
 import pandas as pd
 from typing import Dict, List
-from tabulate import tabulate
 from datetime import datetime
 import inquirer
 import os
 import sys
 from calendar import month_name
 
+from rich.console import Console
+from rich.table import Table
+from rich.text import Text
+from rich import box 
+
 from config import PRIMARY_CURRENCY, EXIT_CODE_RETURN_TO_MENU, CHOICE_EXIT, CHOICE_STOCK_SUMMARY, CHOICE_PORTFOLIO_SUMMARY
-from utils.data_loader import load_analysis_output, load_dividends_data
+from utils.data_loader import load_analysis_output, load_dividends_data, load_market_data
+from app.portfolio.portfolio_metrics import get_portfolio_dividends_per_quarter
 
 def _format_free_cash(free_cash_by_currency: Dict) -> str:
     """Formats the free cash dictionary into a string for display."""
@@ -28,84 +33,74 @@ def _format_free_cash(free_cash_by_currency: Dict) -> str:
             
     return ", ".join(parts)
 
-def generate_portfolio_summary_table(portfolio_summary: Dict) -> List[List]:
+def print_portfolio_summary_rich(console: Console, portfolio_summary: Dict):
     """
-    Generates the portfolio summary table with Performance and Dividends sections.
+    Prints the portfolio summary with Performance and Dividends sections using Rich tables.
     Args:
         portfolio_summary (Dict): The portfolio summary data.
-    Returns:
-        List[List]: A list containing two sublists for Performance and Dividends tables.
     """
-
     today = datetime.now()
 
-    # Performance Data
-    perf_data = [
-        ["Total Contribution:", f"{portfolio_summary['total_contribution']:.2f} {PRIMARY_CURRENCY}"],
-        ["Total Cost:", f"{portfolio_summary['portfolio_cost']:.2f} {PRIMARY_CURRENCY}"],
-        ["Total Value:", f"{portfolio_summary['portfolio_value']:.2f} {PRIMARY_CURRENCY}"],
-        ["Total P/L:", f"{portfolio_summary['total_portfolio_profit_loss']:+.2f} {PRIMARY_CURRENCY} ({portfolio_summary['total_return_percentage']:+.2%}, p.a. {portfolio_summary['annualized_return_percentage']:+.2%})"],
-        ["Free Cash:", _format_free_cash(portfolio_summary['free_cash_by_currency'])],
-        ["Total Dividends:", f"{portfolio_summary['total_dividends']:.2f} {PRIMARY_CURRENCY} (Tax: {portfolio_summary['total_dividend_tax']:.2f} {PRIMARY_CURRENCY})"],
-        ["Realized P/L:", f"{portfolio_summary['realized_pl']:+.2f} {PRIMARY_CURRENCY} ({portfolio_summary['realized_pl_percentage']:+.2%})"],
-        ["Unrealized P/L:", f"{portfolio_summary['unrealized_pl']:+.2f} {PRIMARY_CURRENCY} ({portfolio_summary['unrealized_pl_percentage']:+.2%})"]
-    ]
-    
-    # Dividends Data
-    div_data = [
-        ["PADI:", f"{portfolio_summary['padi']:.2f} {PRIMARY_CURRENCY}"],
-        [f"Income YTD ({today.year}):", f"{portfolio_summary['dividends_ytd']:.2f} {PRIMARY_CURRENCY}"],
-        ["Income LTM:", f"{portfolio_summary['dividends_ltm']:.2f} {PRIMARY_CURRENCY}"],
-        ["Forward Yield:", f"{portfolio_summary['forward_dividend_yield']:+.2%}"],
-        ["Yield on Cost:", f"{portfolio_summary['dividend_yield_on_cost']:+.2%}"],
-        ["Growth TTM (cost-weighted):", f"{portfolio_summary['portfolio_dividend_growth_ttm_cost_weighted']:+.2%}"],
-        ["Growth TTM (PADI-weighted):", f"{portfolio_summary['portfolio_dividend_growth_ttm_padi_weighted']:+.2%}"]
-    ]
+    # --- Performance Table ---
+    perf_table = Table(title="Portfolio Performance", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    perf_table.add_column("Metric", style="cyan", no_wrap=True)
+    perf_table.add_column("Value", style="white")
 
-    perf_table_str = tabulate(perf_data, headers=["Metric", "Value"], tablefmt="grid", disable_numparse=True)
-    div_table_str = tabulate(div_data, headers=["Metric", "Value"], tablefmt="grid", disable_numparse=True)
+    perf_table.add_row("Total Contribution", f"{portfolio_summary['total_contribution']:.2f} {PRIMARY_CURRENCY}")
+    perf_table.add_row("Total Cost", f"{portfolio_summary['portfolio_cost']:.2f} {PRIMARY_CURRENCY}")
+    perf_table.add_row("Total Value", f"{portfolio_summary['portfolio_value']:.2f} {PRIMARY_CURRENCY}")
+    perf_table.add_row("Total P/L", f"{portfolio_summary['total_portfolio_profit_loss']:+.2f} {PRIMARY_CURRENCY} ({portfolio_summary['total_return_percentage']:+.2%}, p.a. {portfolio_summary['annualized_return_percentage']:+.2%})")
+    perf_table.add_row("Free Cash", _format_free_cash(portfolio_summary['free_cash_by_currency']))
+    perf_table.add_row("Total Dividends", f"{portfolio_summary['total_dividends']:.2f} {PRIMARY_CURRENCY} (Tax: {portfolio_summary['total_dividend_tax']:.2f} {PRIMARY_CURRENCY})")
+    perf_table.add_row("Realized P/L", f"{portfolio_summary['realized_pl']:+.2f} {PRIMARY_CURRENCY} ({portfolio_summary['realized_pl_percentage']:+.2%})")
+    perf_table.add_row("Unrealized P/L", f"{portfolio_summary['unrealized_pl']:+.2f} {PRIMARY_CURRENCY} ({portfolio_summary['unrealized_pl_percentage']:+.2%})")
 
-    main_table_data = [
-        ["Performance", perf_table_str],
-        ["Dividends", div_table_str]
-    ]
+    # --- Dividends Table ---
+    div_table = Table(title="Portfolio Dividends Metrics", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    div_table.add_column("Metric", style="cyan", no_wrap=True)
+    div_table.add_column("Value", style="white")
 
-    return main_table_data
+    div_table.add_row("PADI", f"{portfolio_summary['padi']:.2f} {PRIMARY_CURRENCY}")
+    div_table.add_row(f"Income YTD ({today.year})", f"{portfolio_summary['dividends_ytd']:.2f} {PRIMARY_CURRENCY}")
+    div_table.add_row("Income LTM", f"{portfolio_summary['dividends_ltm']:.2f} {PRIMARY_CURRENCY}")
+    div_table.add_row("Forward Yield", f"{portfolio_summary['forward_dividend_yield']:+.2%}")
+    div_table.add_row("Yield on Cost", f"{portfolio_summary['dividend_yield_on_cost']:+.2%}")
+    div_table.add_row("Growth TTM (cost-weighted)", f"{portfolio_summary['portfolio_dividend_growth_ttm_cost_weighted']:+.2%}")
+    div_table.add_row("Growth TTM (PADI-weighted)", f"{portfolio_summary['portfolio_dividend_growth_ttm_padi_weighted']:+.2%}")
 
-def _generate_stock_status_table(details: Dict, price_currency: str) -> str:
+    console.print(perf_table)
+    console.print(div_table)
+
+def _generate_stock_status_table(details: Dict, price_currency: str) -> Table:
     """
     Generates a formatted stock status table for a ticker.
-    Args:
-        details (Dict): The ticker details dictionary with current price information and current shares count.
-        price_currency (str): The currency of the listed ticker.
-    Returns:
-        str: The formatted table with Metrics and Values columns as a string for outputting stock status.
     """
-    
     if not details:
-        return ""
+        return None
     
     current_price = details.get('current_price')
     shares_count = details.get('current_shares')
     
-    status_data = [
-        [f"Current Price:", f"{current_price:.4f} {price_currency}" if current_price is not None else "N/A"],
-        [f"Shares:", f"{shares_count:.4f}" if shares_count is not None else "N/A"]   # Display up to 4 decimal places for shares due to fractional shares
-    ]
+    table = Table(title="Status", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Metric", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
 
-    return tabulate(status_data, headers=["Metric", "Value"], tablefmt="grid", disable_numparse=True)
+    if details.get('name'):
+        table.add_row("Company Name", details['name'])
+    if details.get('sector'):
+        table.add_row("Sector", details['sector'])
+    
+    table.add_row("Current Price", f"{current_price:.4f} {price_currency}" if current_price is not None else "N/A")
+    table.add_row("Shares", f"{shares_count:.4f}" if shares_count is not None else "N/A")
 
-def _generate_stock_performance_table(details: Dict) -> str:
+    return table
+
+def _generate_stock_performance_table(details: Dict) -> Table:
     """
     Generates a formatted stock performance table for a ticker.
-    Args:
-        details (Dict): The ticker details dictionary.
-    Returns:
-        str: The formatted table with Metrics and Values columns as a string for outputting stock performance.
     """
-
     if not details:
-        return ""
+        return None
     
     cost_basis = details.get('cost_basis_primary_currency')
     market_value = details.get('market_value_primary')
@@ -117,29 +112,25 @@ def _generate_stock_performance_table(details: Dict) -> str:
     total_pl = details.get('total_profit_loss_primary_currency')
     total_pl_perc = details.get('total_profit_loss_percentage')
     
-    perf_data = [
-        [f"Cost Basis:", f"{cost_basis:.2f} {PRIMARY_CURRENCY}" if cost_basis is not None else "N/A"],
-        [f"Market Value:", f"{market_value:.2f} {PRIMARY_CURRENCY}" if market_value is not None else "N/A"],
-        [f"Unrealized P/L:", f"{unrealized_pl:+.2f} {PRIMARY_CURRENCY} ({unrealized_pl_perc:+.2%})" if unrealized_pl is not None and unrealized_pl_perc is not None else "N/A"],
-        [f"Realized P/L:", f"{realized_pl:+.2f} {PRIMARY_CURRENCY} ({realized_pl_perc:+.2%})" if realized_pl is not None and realized_pl_perc is not None else "N/A"],
-        [f"Dividends:", f"{dividends:+.2f} {PRIMARY_CURRENCY}" if dividends is not None else "N/A"],
-        [f"Total P/L:", f"{total_pl:+.2f} {PRIMARY_CURRENCY} ({total_pl_perc:+.2%})" if total_pl is not None and total_pl_perc is not None else "N/A"]
-    ]
+    table = Table(title="Performance", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Metric", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
 
-    return tabulate(perf_data, headers=["Metric", "Value"], tablefmt="grid", disable_numparse=True)
+    table.add_row("Cost Basis", f"{cost_basis:.2f} {PRIMARY_CURRENCY}" if cost_basis is not None else "N/A")
+    table.add_row("Market Value", f"{market_value:.2f} {PRIMARY_CURRENCY}" if market_value is not None else "N/A")
+    table.add_row("Unrealized P/L", f"{unrealized_pl:+.2f} {PRIMARY_CURRENCY} ({unrealized_pl_perc:+.2%})" if unrealized_pl is not None and unrealized_pl_perc is not None else "N/A")
+    table.add_row("Realized P/L", f"{realized_pl:+.2f} {PRIMARY_CURRENCY} ({realized_pl_perc:+.2%})" if realized_pl is not None and realized_pl_perc is not None else "N/A")
+    table.add_row("Dividends", f"{dividends:+.2f} {PRIMARY_CURRENCY}" if dividends is not None else "N/A")
+    table.add_row("Total P/L", f"{total_pl:+.2f} {PRIMARY_CURRENCY} ({total_pl_perc:+.2%})" if total_pl is not None and total_pl_perc is not None else "N/A")
 
-def _generate_div_metrics_table(details: Dict, price_currency: str) -> str:
+    return table
+
+def _generate_div_metrics_table(details: Dict, price_currency: str) -> Table:
     """
     Generates a formatted dividend metrics table for a ticker.
-    Args:
-        details (Dict): The ticker details dictionary.
-        price_currency (str): The currency of the listed ticker.
-    Returns:
-        str: The formatted table with Metrics and Values columns as a string for outputting dividend metrics.
     """
-
     if not details:
-        return ""
+        return None
     
     fwd_dividend = details.get('forward_dividend')
     padi = details.get('padi')
@@ -148,28 +139,25 @@ def _generate_div_metrics_table(details: Dict, price_currency: str) -> str:
     yield_on_cost = details.get('yield_on_cost')
     next_dividend_month = details.get('next_dividend_month')
     
-    div_data = [
-        [f"Forward Dividend:", f"{fwd_dividend:.4f} {price_currency}" if fwd_dividend is not None else "N/A"],
-        [f"Annual Income:", f"{padi:.2f} {PRIMARY_CURRENCY}" if padi is not None else "N/A"],
-        [f"Dividend Yield:", f"{dividend_yield:.2%}" if dividend_yield is not None else "N/A"],
-        [f"5Y Avg. Yield:", f"{avg_div_yield_5y:.2%}" if avg_div_yield_5y is not None else "N/A"],
-        [f"Yield on Cost:", f"{yield_on_cost:.2%}" if yield_on_cost is not None else "N/A"],
-        [f"Next Payment:", f"{next_dividend_month}" if next_dividend_month is not None else "N/A"]
-    ]
+    table = Table(title="Dividend Metrics", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Metric", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
 
-    return tabulate(div_data, headers=["Metric", "Value"], tablefmt="grid", disable_numparse=True)
+    table.add_row("Forward Dividend", f"{fwd_dividend:.4f} {price_currency}" if fwd_dividend is not None else "N/A")
+    table.add_row("Annual Income", f"{padi:.2f} {PRIMARY_CURRENCY}" if padi is not None else "N/A")
+    table.add_row("Dividend Yield", f"{dividend_yield:.2%}" if dividend_yield is not None else "N/A")
+    table.add_row("5Y Avg. Yield", f"{avg_div_yield_5y:.2%}" if avg_div_yield_5y is not None else "N/A")
+    table.add_row("Yield on Cost", f"{yield_on_cost:.2%}" if yield_on_cost is not None else "N/A")
+    table.add_row("Next Payment", f"{next_dividend_month}" if next_dividend_month is not None else "N/A")
 
-def _generate_div_growth_table(details: Dict) -> str:
+    return table
+
+def _generate_div_growth_table(details: Dict) -> Table:
     """
     Generates a formatted dividend growth table for a ticker.
-    Args:
-        details (Dict): The ticker details dictionary.
-    Returns:
-        str: The formatted table with Metrics and Values columns as a string for outputting dividend growth.
     """
-
     if not details or 'dividend_growth' not in details:
-        return ""
+        return None
 
     div_ttm_growth = details['dividend_growth'].get('ttm')
     div_3y_cagr = details['dividend_growth'].get('cagr_3y')
@@ -180,55 +168,54 @@ def _generate_div_growth_table(details: Dict) -> str:
     if div_ttm_growth:
         div_ttm_growth_str = f"{div_ttm_growth[0]:+.2f} (New)" if len(div_ttm_growth) < 2 or div_ttm_growth[1] is None else f"{div_ttm_growth[0]:+.2f} ({div_ttm_growth[1]:+.2%})"
 
-    div_growth_data = [
-        [f"TTM Growth:", div_ttm_growth_str],
-        [f"3Y CAGR:", f"{f'{div_3y_cagr:+.2%}' if div_3y_cagr is not None else 'N/A'}"],
-        [f"5Y CAGR:", f"{f'{div_5y_cagr:+.2%}' if div_5y_cagr is not None else 'N/A'}"],
-        [f"10Y CAGR:", f"{f'{div_10y_cagr:+.2%}' if div_10y_cagr is not None else 'N/A'}"]
-    ]
+    table = Table(title="Dividend Growth", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Metric", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
 
-    return tabulate(div_growth_data, headers=["Metric", "Value"], tablefmt="grid", disable_numparse=True)
+    table.add_row("TTM Growth", div_ttm_growth_str)
+    table.add_row("3Y CAGR", f"{f'{div_3y_cagr:+.2%}' if div_3y_cagr is not None else 'N/A'}")
+    table.add_row("5Y CAGR", f"{f'{div_5y_cagr:+.2%}' if div_5y_cagr is not None else 'N/A'}")
+    table.add_row("10Y CAGR", f"{f'{div_10y_cagr:+.2%}' if div_10y_cagr is not None else 'N/A'}")
 
-def _generate_ratio_summary_table(details: Dict, portfolio_value: float) -> str:
+    return table
+
+def _generate_ratio_summary_table(details: Dict, portfolio_value: float) -> Table:
     """
     Generates a formatted ratio summary table for a ticker.
-    Args:
-        details (Dict): The ticker details dictionary.
-        portfolio_value (float): The total value of the portfolio.
-    Returns:
-        str: The formatted table with Metrics and Values columns as a string for outputting ratio summary.
     """
-
     if not details:
-        return ""
+        return None
 
     div_market_value = details.get('market_value_primary')
     div_ratio_on_cost = details.get('ratio_on_cost')
     div_ratio_on_padi = details.get('ratio_on_padi')
 
-    ratio_data = [
-        [f"Value Ratio:", f"{(div_market_value / portfolio_value):.2%}" if portfolio_value > 0 else "N/A"],
-        [f"Cost Ratio:", f"{div_ratio_on_cost:.2%}"],
-        [f"PADI Ratio:", f"{div_ratio_on_padi:.2%}"]
-    ]
+    table = Table(title="Ratios", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Metric", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
 
-    return tabulate(ratio_data, headers=["Metric", "Value"], tablefmt="grid", disable_numparse=True)
+    table.add_row("Value Ratio", f"{(div_market_value / portfolio_value):.2%}" if portfolio_value > 0 else "N/A")
+    table.add_row("Cost Ratio", f"{div_ratio_on_cost:.2%}")
+    table.add_row("PADI Ratio", f"{div_ratio_on_padi:.2%}")
 
-def _generate_positions_table(details: Dict, price_currency: str) -> str:
+    return table
+
+def _generate_positions_table(details: Dict, price_currency: str) -> Table:
     """
     Generates a formatted open positions table for a ticker.
-    Args:
-        details (Dict): The ticker details dictionary.
-        price_currency (str): The currency of the listed ticker.
-    Returns:
-        str: The formatted table with detailed information of open positions as a string for outputting results.
     """
     open_positions = details.get('open_positions', [])
     if not open_positions:
-        return ""
+        return None
 
-    headers = ['Date', 'Shares', 'Price', f'Cost', f'Unrealized Gain', 'Broker']
-    positions_data = []
+    table = Table(title="Open Positions", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Date", style="cyan")
+    table.add_column("Shares", justify="right", style="white")
+    table.add_column("Price", justify="right", style="white")
+    table.add_column("Cost", justify="right", style="white")
+    table.add_column("Unrealized Gain", justify="right", style="white")
+    table.add_column("Broker", style="magenta")
+
     for p in open_positions:
         date = p.get('date', 'N/A')
         
@@ -248,28 +235,16 @@ def _generate_positions_table(details: Dict, price_currency: str) -> str:
         unrealized_perc = p.get('unrealized_gain_perc')
         unrealized_str = f"{float(unrealized_gain):+.2f} {PRIMARY_CURRENCY} ({float(unrealized_perc):+.2%})" if unrealized_gain is not None and unrealized_perc is not None else "N/A"
 
-        positions_data.append([
-            date,
-            shares_str,
-            price_str,
-            cost_str,
-            unrealized_str,
-            broker
-        ])
+        table.add_row(date, shares_str, price_str, cost_str, unrealized_str, broker)
 
-    return tabulate(positions_data, headers=headers, tablefmt="grid", disable_numparse=True)
+    return table
 
-def _generate_performance_summary_table(details: Dict) -> str:
+def _generate_performance_summary_table(details: Dict) -> Table:
     """
     Generates a formatted performance summary table for a ticker.
-    Args:
-        details (Dict): The ticker details dictionary.
-    Returns:
-        str: The formatted table with Metrics and Values columns as a string for outputting performance summary.
     """
-
     if not details:
-        return ""
+        return None
     
     realized_gain = details.get('realized_gain_primary_currency')
     realized_gain_perc = details.get('realized_gain_percentage')
@@ -277,29 +252,30 @@ def _generate_performance_summary_table(details: Dict) -> str:
     total_profit_loss = details.get('total_profit_loss_primary_currency')
     total_profit_loss_perc = details.get('total_profit_loss_percentage')
 
-    perf_data = [
-        [f"Realized Gain:", f"{realized_gain:+.2f} {PRIMARY_CURRENCY} ({realized_gain_perc:+.2%})" if realized_gain is not None and realized_gain_perc is not None else "N/A"],
-        [f"Total Dividends:", f"{total_dividends:+.2f} {PRIMARY_CURRENCY}" if total_dividends is not None else "N/A"],
-        [f"Total P/L:", f"{total_profit_loss:+.2f} {PRIMARY_CURRENCY} ({total_profit_loss_perc:+.2%})" if total_profit_loss is not None and total_profit_loss_perc is not None else "N/A"]
-    ]
+    table = Table(title="Performance Summary", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Metric", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
 
-    return tabulate(perf_data, headers=["Metric", "Value"], tablefmt="grid", disable_numparse=True)
+    table.add_row("Realized Gain", f"{realized_gain:+.2f} {PRIMARY_CURRENCY} ({realized_gain_perc:+.2%})" if realized_gain is not None and realized_gain_perc is not None else "N/A")
+    table.add_row("Total Dividends", f"{total_dividends:+.2f} {PRIMARY_CURRENCY}" if total_dividends is not None else "N/A")
+    table.add_row("Total P/L", f"{total_profit_loss:+.2f} {PRIMARY_CURRENCY} ({total_profit_loss_perc:+.2%})" if total_profit_loss is not None and total_profit_loss_perc is not None else "N/A")
 
-def _generate_closed_positions_table(closed_positions: List[Dict], price_currency: str) -> str:
+    return table
+
+def _generate_closed_positions_table(closed_positions: List[Dict], price_currency: str) -> Table:
     """
     Generates a formatted table for closed positions.
-    Args:
-        closed_positions (List[Dict]): List of closed position dictionaries per ticker.
-        price_currency (str): The currency of the listed ticker.
-    Returns:
-        str: The formatted table with detailed information of closed positions as a string for outputting results.
     """
-
     if not closed_positions:
-        return ""
+        return None
 
-    headers = ['Open / Close Date', 'Shares', 'Open / Close Price', 'Purchase / Sale Value', 'Realized Gain', 'Broker']
-    closed_data = []
+    table = Table(title="Closed Positions", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Open / Close Date", style="cyan")
+    table.add_column("Shares", justify="right", style="white")
+    table.add_column("Open / Close Price", justify="right", style="white")
+    table.add_column("Purchase / Sale Value", justify="right", style="white")
+    table.add_column("Realized Gain", justify="right", style="white")
+    table.add_column("Broker", style="magenta")
 
     for p in closed_positions:
         open_date = p.get('open_date', 'N/A')
@@ -315,7 +291,7 @@ def _generate_closed_positions_table(closed_positions: List[Dict], price_currenc
         realized_pl_perc = p.get('realized_gain_percentage')
 
         open_close_date_str = f"{open_date} / {close_date}"
-        shares_str = f"{shares:.4f}" if shares is not None else "N/A"  # Display up to 4 decimal places for shares due to fractional shares
+        shares_str = f"{shares:.4f}" if shares is not None else "N/A"
         open_price_str = f"{open_price:+.2f} {price_currency}" if open_price is not None else "N/A"
         close_price_str = f"{close_price:+.2f} {price_currency}" if close_price is not None else "N/A"
         open_close_price_str = f"{open_price_str} / {close_price_str}"
@@ -323,31 +299,24 @@ def _generate_closed_positions_table(closed_positions: List[Dict], price_currenc
         sale_value_str = f"{sale_value:+.2f} {currency}" if sale_value is not None else "N/A"
         purchase_sale_value_str = f"{purchase_value_str} / {sale_value_str}"
         realized_gain_str = f"{realized_pl:+.2f} {currency} ({realized_pl_perc:+.2%})" if realized_pl is not None and realized_pl_perc is not None else "N/A"
-        closed_data.append([
-            open_close_date_str,
-            shares_str,
-            open_close_price_str,
-            purchase_sale_value_str,
-            realized_gain_str,
-            broker
-        ])
+        
+        table.add_row(open_close_date_str, shares_str, open_close_price_str, purchase_sale_value_str, realized_gain_str, broker)
 
-    return tabulate(closed_data, headers=headers, tablefmt="grid", disable_numparse=True)
+    return table
 
-def _generate_dividends_history_table(ticker_dividends: List[Dict]) -> str:
+def _generate_dividends_history_table(ticker_dividends: List[Dict]) -> Table:
     """
     Generates a formatted table for dividend history.
-    Args:
-        ticker_dividends (List[Dict]): List of dividend dictionaries per ticker.
-    Returns:
-        str: The formatted table with detailed information of dividend history as a string for outputting results.
     """
-
     if not ticker_dividends:
-        return ""
+        return None
     
-    headers = ["Paid Date", "Amount per Share", "Received Amount", "Withholding Tax"]
-    div_history_data = []
+    table = Table(title="Dividends History", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Paid Date", style="cyan")
+    table.add_column("Amount per Share", justify="right", style="white")
+    table.add_column("Received Amount", justify="right", style="white")
+    table.add_column("Withholding Tax", justify="right", style="white")
+
     for ticker_dividend in ticker_dividends:
         date = ticker_dividend.get('date', 'N/A')
         amount_per_share = ticker_dividend.get('amount_per_share')
@@ -357,26 +326,25 @@ def _generate_dividends_history_table(ticker_dividends: List[Dict]) -> str:
         withholding_tax = ticker_dividend.get('withholding_tax')
         withholding_tax_rate = ticker_dividend.get('withholding_tax_rate')
 
-        div_history_data.append(
-            [
-                f"{date}",
-                f"{amount_per_share:+.4f} {amount_per_share_currency}" if amount_per_share else "N/A",
-                f"{amount:+.2f} {currency}" if amount else "N/A",
-                f"{withholding_tax:+.2f} {currency} / {withholding_tax_rate:+.1f}%" if withholding_tax else "N/A",
-            ]
-        )
+        amount_per_share_str = f"{amount_per_share:+.4f} {amount_per_share_currency}" if amount_per_share else "N/A"
+        amount_str = f"{amount:+.2f} {currency}" if amount else "N/A"
+        tax_str = f"{withholding_tax:+.2f} {currency} / {withholding_tax_rate:+.1f}%" if withholding_tax else "N/A"
 
-    return tabulate(div_history_data, headers=headers, tablefmt="grid", disable_numparse=True)
+        table.add_row(f"{date}", amount_per_share_str, amount_str, tax_str)
 
-def generate_dividend_summary_table(all_tickers_data: Dict[str, Dict], portfolio_summary: Dict, timeframe_months: int = 12) -> str:
+    return table
+
+def print_dividend_summary_table_enhanced(console: Console, all_tickers_data: Dict[str, Dict], portfolio_summary: Dict, timeframe_months: int = 12):
     """
-    Generates a dividend summary calendar based on pre-calculated payment months.
+    Prints a rich dividend summary calendar based on pre-calculated payment months.
     """
     dividend_calendar = {}  # { 'Month Year': [Tickers] }
     projected_income = portfolio_summary.get('projected_dividend_income', {})
+    
     today = datetime.now()
-    # Set day to 1 to avoid issues with month-end calculations
-    today = today.replace(day=1)
+    # Reset to the beginning of the current day/month (00:00:00) so we capture everything from today onwards
+    today = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    
     time_limit = today + pd.DateOffset(months=timeframe_months)
 
     for ticker, details in all_tickers_data.items():
@@ -404,128 +372,182 @@ def generate_dividend_summary_table(all_tickers_data: Dict[str, Dict], portfolio
                             dividend_calendar[month_year_str].append(ticker)
 
     if not dividend_calendar:
-        return "No upcoming dividends found for owned stocks."
+        console.print("[yellow]No upcoming dividends found for owned stocks.[/yellow]")
+        return
 
-    # Sort by date and format for tabulate
+    # Sort by date
     sorted_months = sorted(dividend_calendar.keys(), key=lambda x: datetime.strptime(x, '%B %Y'))
     
-    table_data = []
+    table = Table(title="Dividend Summary", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Month", style="cyan", no_wrap=True)
+    table.add_column("Projected Income", justify="right", style="white")
+    table.add_column("Tickers", style="dim white")
+
     for month in sorted_months:
         tickers = ", ".join(sorted(dividend_calendar[month]))
         income = projected_income.get(month, 0.0)
-        table_data.append([month, f"{income:,.2f} {PRIMARY_CURRENCY}", tickers])
+        table.add_row(month, f"{income:,.2f} {PRIMARY_CURRENCY}", tickers)
 
-    return tabulate(table_data, headers=["Month", "Projected Income", "Tickers"], tablefmt="grid", disable_numparse=True)
+    console.print(table)
 
 
-def generate_stock_summary_output(all_tickers_data: Dict[str, Dict], portfolio_value: float, dividends_data: Dict[str, List[Dict]], tickers_to_show: List[str] = None) -> str:
+def print_stock_summary_rich(console: Console, all_tickers_data: Dict[str, Dict], portfolio_value: float, dividends_data: Dict[str, List[Dict]], tickers_to_show: List[str] = None):
     """
-    Generates and prints the stock summary output to the console.
+    Prints the stock summary output to the console using Rich tables.
     Args:
         all_tickers_data (Dict[str, Dict]): The processed data for all tickers.
         portfolio_value (float): The total value of the portfolio.
         dividends_data (Dict[str, List[Dict]]): The dividends history data.
         tickers_to_show (List[str], optional): A list of tickers to show. If None, all are shown. Defaults to None.
-    Returns:
-        str: The formatted stock summary report.
     """
-
-    owned_tickers_output, sold_tickers_output = [], []
 
     tickers_to_iterate = sorted(all_tickers_data.keys())
     
     if tickers_to_show:
         tickers_to_iterate = tickers_to_show
 
+    displayed_any = False
+
     for ticker_name in tickers_to_iterate:
         details = all_tickers_data[ticker_name]
         price_currency = details.get('price_currency', '')
         ticker_dividends = dividends_data.get('companies', {}).get(ticker_name, {}).get('dividends', [])
         
-        if details['current_shares'] > 0:
-            table_data = []
+        # --- Heading for Ticker ---
+        # Determine if owned or sold for header text
+        is_owned = details['current_shares'] > 0
+        display_name = f" - {details['name']}" if details.get('name') else ""
+        header_text = f"{details['ticker']}{display_name} ({'Owned' if is_owned else 'Sold'})"
+        
+        # Only print header if we are going to print tables
+        # But we need to know if we have tables.
+        
+        tables_to_print = []
 
+        if is_owned:
             # --- Status ---
             status_table = _generate_stock_status_table(details, price_currency)
-            if status_table:
-                table_data.append(["Status", status_table])
+            if status_table: tables_to_print.append(status_table)
 
             # --- Performance ---
             perf_table = _generate_stock_performance_table(details)
-            if perf_table:
-                table_data.append(["Performance", perf_table])
+            if perf_table: tables_to_print.append(perf_table)
 
             # --- Dividends Metrics ---
             div_table = _generate_div_metrics_table(details, price_currency)
-            if div_table:
-                table_data.append(["Dividends", div_table])
+            if div_table: tables_to_print.append(div_table)
 
             # --- Dividend Growth ---
             div_growth_table = _generate_div_growth_table(details)
-            if div_growth_table:
-                table_data.append(["Div. Growth", div_growth_table])
+            if div_growth_table: tables_to_print.append(div_growth_table)
 
             # --- Ratios ---
             ratio_table = _generate_ratio_summary_table(details, portfolio_value)
-            if ratio_table:
-                table_data.append(["Ratios", ratio_table])
+            if ratio_table: tables_to_print.append(ratio_table)
 
             # --- Open Positions ---
             positions_table = _generate_positions_table(details, price_currency)
-            if positions_table:
-                table_data.append(["Open Positions", positions_table])
+            if positions_table: tables_to_print.append(positions_table)
 
             # --- Closed Positions ---
             closed_positions_table = _generate_closed_positions_table(details['closed_positions'], price_currency)
-            if closed_positions_table:
-                table_data.append(["Closed Positions", closed_positions_table])
+            if closed_positions_table: tables_to_print.append(closed_positions_table)
 
             # --- Dividends History ---
             dividends_table = _generate_dividends_history_table(ticker_dividends)
-            if dividends_table:
-                table_data.append(["Dividends History", dividends_table])
-
-            owned_tickers_output.append(tabulate(table_data, headers=[f"{details['ticker']} (Owned)", "Metrics"], tablefmt="grid", disable_numparse=True))
+            if dividends_table: tables_to_print.append(dividends_table)
 
         else:
             if details.get('closed_positions'):
-                table_data = []
-                
                 # --- Performance Summary ---
                 performance_summary_table = _generate_performance_summary_table(details)
-                if performance_summary_table:
-                    table_data.append(["Performance Summary", performance_summary_table])
+                if performance_summary_table: tables_to_print.append(performance_summary_table)
 
                 # --- Closed Positions Table ---
                 closed_positions_table = _generate_closed_positions_table(details['closed_positions'], price_currency)
-                if closed_positions_table:
-                    table_data.append(["Closed Positions", closed_positions_table])
+                if closed_positions_table: tables_to_print.append(closed_positions_table)
 
                 # --- Dividends History ---
                 dividends_table = _generate_dividends_history_table(ticker_dividends)
-                if dividends_table:
-                    table_data.append(["Dividends History", dividends_table])
+                if dividends_table: tables_to_print.append(dividends_table)
 
-                output_table = tabulate(table_data, headers=[f"{details['ticker']} (Sold)", "Metrics"], tablefmt="grid", disable_numparse=True)
-                sold_tickers_output.append(output_table)
+        if tables_to_print:
+            displayed_any = True
+            console.rule(f"[bold yellow]{header_text}[/bold yellow]")
+            for t in tables_to_print:
+                console.print(t)
+            console.print("") # spacing
 
-    output_blocks = []
-    if owned_tickers_output:
-        output_blocks.append("\n".join(owned_tickers_output))
+    if not displayed_any:
+        console.print("[yellow]No owned or sold tickers to display.[/yellow]")
+
+
+def print_dividend_history_chart(console: Console, dividends_data: dict, exchange_rate_cache: dict):
+    """
+    Prints a rich horizontal bar chart for quarterly dividends.
+    """
+    quarterly_divs = get_portfolio_dividends_per_quarter(dividends_data, exchange_rate_cache, PRIMARY_CURRENCY)
+    
+    if not quarterly_divs:
+        console.print("[yellow]No dividends data available.[/yellow]")
+        return
+
+    sorted_quarters = sorted(quarterly_divs.keys())
+    if not sorted_quarters:
+        console.print("[yellow]No dividends data available.[/yellow]")
+        return
+
+    max_val = max(quarterly_divs.values())
+    max_width_bars = 40 
+
+    table = Table(title="Dividend History (Quarterly)", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Quarter", style="cyan", no_wrap=True)
+    table.add_column("Bar", no_wrap=True)
+    table.add_column("Amount", justify="right", style="white")
+    table.add_column("Y/Y Change", justify="right")
+
+    for i, (year, quarter) in enumerate(sorted_quarters):
+        amount = quarterly_divs[(year, quarter)]
         
-    if sold_tickers_output:
-            output_blocks.append("\n".join(sold_tickers_output))
+        # Calculate bar length
+        bar_len = int((amount / max_val) * max_width_bars) if max_val > 0 else 0
+        bar_str = "█" * bar_len
+        bar_render = f"[{'blue' if i % 2 == 0 else 'dodger_blue1'}]{bar_str}[/]"
+        
+        short_year = str(year)[-2:]
+        quarter_str = f"Q{quarter}/{short_year}"
+        
+        amount_str = f"{amount:,.2f} {PRIMARY_CURRENCY}"
 
-    if not output_blocks:
-            return "No owned or sold tickers to display."
+        change_render = ""
+        # Y/Y Start from 5th item
+        if i >= 4:
+            prev_year_quarter = (year - 1, quarter)
+            if prev_year_quarter in quarterly_divs:
+                prev_amount = quarterly_divs[prev_year_quarter]
+                if prev_amount > 0:
+                    change = (amount - prev_amount) / prev_amount
+                    if change > 0:
+                        change_render = f"[green]+{change:.2%}[/green]"
+                    elif change < 0:
+                        change_render = f"[red]{change:.2%}[/red]"
+                    else:
+                        change_render = "[grey]0.00%[/grey]"
+                else:
+                     change_render = "[dim]N/A[/dim]"
+            else:
+                 change_render = "[dim]N/A[/dim]"
+        
+        table.add_row(quarter_str, bar_render, amount_str, change_render)
 
-    return "\n\n".join(output_blocks)
+    console.print(table)
 
 
 def main():
     """
     Main function to run the stock reporter.
     """
+    console = Console()
     print("--- Starting Stock Reporter ---")
 
     portfolio_summary, all_tickers_data = load_analysis_output()
@@ -535,11 +557,17 @@ def main():
     dividends_data = load_dividends_data()
     if dividends_data is None:
         return
+    
+    market_data = load_market_data()
+    exchange_rate_cache = market_data.get('exchange_rate_cache', {})
+    if not exchange_rate_cache:
+        print("Warning: Exchange rate cache unavailable. Dividend calculations might be inaccurate.")
 
     main_menu_choices = [
         "Stock Summary", 
         "Portfolio Summary",
         "Dividend Summary",
+        "Dividend History",
         "Exit"
     ]
     
@@ -583,16 +611,16 @@ def main():
                 if selected_ticker != "All":
                     tickers_to_print = [selected_ticker]
                 
-                stock_summary_output = generate_stock_summary_output(all_tickers_data, portfolio_summary['portfolio_value'], dividends_data, tickers_to_print)
-                print(stock_summary_output)
+                print_stock_summary_rich(console, all_tickers_data, portfolio_summary['portfolio_value'], dividends_data, tickers_to_print)
 
             elif choice == CHOICE_PORTFOLIO_SUMMARY:
-                portfolio_summary_table = generate_portfolio_summary_table(portfolio_summary)
-                print(tabulate(portfolio_summary_table, headers=["Portfolio Summary", ""], tablefmt="grid", disable_numparse=True))
+                print_portfolio_summary_rich(console, portfolio_summary)
 
             elif choice == "Dividend Summary":
-                dividend_summary_output = generate_dividend_summary_table(all_tickers_data, portfolio_summary)
-                print(dividend_summary_output)
+                print_dividend_summary_table_enhanced(console, all_tickers_data, portfolio_summary)
+            
+            elif choice == "Dividend History":
+                print_dividend_history_chart(console, dividends_data, exchange_rate_cache)
 
             elif choice == CHOICE_EXIT:
                 print("Exiting reporter.")

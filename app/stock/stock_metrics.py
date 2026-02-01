@@ -4,32 +4,27 @@ from app.portfolio.portfolio_metrics import get_rate_from_cache
 from config import PRIMARY_CURRENCY
 from calendar import month_name
 from typing import List, Dict, Optional
-import yfinance as yf
-
-
-def _get_historical_dividend_dates(ticker: str, all_dividends_data: dict) -> List[datetime]:
+def _get_historical_dividend_dates(ticker: str, all_dividends_data: dict, cached_history: Optional[List[str]] = None) -> List[datetime]:
     """
     Gets a reliable list of historical dividend dates.
-    Prioritizes local payment dates. Falls back to yfinance ex-dividend dates.
-    Does NOT mix the two sources.
+    Prioritizes local payment dates. Falls back to cached history.
     """
-    # 1. Try local payment dates first
+    # 1. Try local payment dates first (from broker reports)
     local_ticker_dividends = all_dividends_data.get('companies', {}).get(ticker, {}).get('dividends', [])
     if local_ticker_dividends:
         payment_dates = sorted([pd.to_datetime(div['date']) for div in local_ticker_dividends], reverse=True)
-        # If we have at least 2 dates, consider it a good source
         if len(payment_dates) >= 2:
             return payment_dates
 
-    # 2. Fallback to yfinance ex-dividend dates
-    try:
-        stock = yf.Ticker(ticker)
-        yfinance_dividends = stock.dividends
-        if not yfinance_dividends.empty:
-            ex_dividend_dates = sorted([pd.to_datetime(date).tz_localize(None) for date in yfinance_dividends.index], reverse=True)
-            return ex_dividend_dates
-    except Exception:
-        pass
+    # 2. Fallback to cached history (from yfinance fetched in update_market_data)
+    if cached_history:
+        return sorted([pd.to_datetime(date) for date in cached_history], reverse=True)
+
+    # 3. Return what we have
+    if local_ticker_dividends:
+        return sorted([pd.to_datetime(div['date']) for div in local_ticker_dividends], reverse=True)
+    
+    return []
 
     # 3. Return empty if no source found, but check for any remaining local dates
     if local_ticker_dividends:
@@ -45,6 +40,11 @@ def calculate_average_dividend_yield(ticker, history_df):
     if history_df.empty:
         return 0.0
 
+    history_df = history_df.copy() # Avoid SettingWithCopyWarning
+    
+    if 'Dividends' not in history_df.columns or 'Close' not in history_df.columns:
+        return 0.0
+        
     history_df['Dividends'] = pd.to_numeric(history_df['Dividends'], errors='coerce')
     dividends = history_df['Dividends'][history_df['Dividends'] > 0]
     if dividends.empty:
@@ -88,6 +88,11 @@ def calculate_dividend_growth(history_df, div_frequency_str):
     if history_df.empty:
         return growth_metrics
 
+    history_df = history_df.copy() # Avoid SettingWithCopyWarning
+    
+    if 'Dividends' not in history_df.columns:
+        return growth_metrics
+        
     history_df['Dividends'] = pd.to_numeric(history_df['Dividends'], errors='coerce')
     dividends = history_df['Dividends'][history_df['Dividends'] > 0]
     if dividends.empty:
@@ -100,8 +105,11 @@ def calculate_dividend_growth(history_df, div_frequency_str):
     # --- TTM Growth Calculation (Forward Dividend Method) ---
     freq_map = {
         'Monthly': 12,
-        'Quartely-Regulary': 4,
-        'Quartely-Unregulary': 4,
+        'Quarterly': 4,
+        'Quarterly-Regulary': 4,
+        'Quarterly-Unregulary': 4,
+        'Quartely-Regulary': 4, # legacy typo support
+        'Quartely-Unregulary': 4, # legacy typo support
         'Semi-Annually': 2,
         'Annually': 1
     }
@@ -176,11 +184,11 @@ def calculate_total_dividends(ticker, all_dividends_data, exchange_rate_cache, p
     return total_dividends, total_tax
 
 
-def get_dividend_payment_months(ticker: str, all_dividends_data: dict) -> List[int]:
+def get_dividend_payment_months(ticker: str, all_dividends_data: dict, cached_history: List[str] = None) -> List[int]:
     """
     Determines the typical months a stock pays dividends based on historical data.
     """
-    dividend_dates = _get_historical_dividend_dates(ticker, all_dividends_data)
+    dividend_dates = _get_historical_dividend_dates(ticker, all_dividends_data, cached_history)
     if not dividend_dates:
         return []
 
@@ -230,14 +238,14 @@ def get_realized_gain_and_cost(closed_positions: dict, exchange_rate_cache: dict
 
     return total_realized_gain_primary, total_cost_of_closed_positions_primary
 
-def predict_next_dividend_month(ticker: str, all_dividends_data: dict, div_frequency: str) -> str:
+def predict_next_dividend_month(ticker: str, all_dividends_data: dict, div_frequency: str, cached_history: List[str] = None) -> str:
     """
     Predicts the month and year of the next dividend payment based on historical data.
     """
     if not div_frequency or div_frequency == 'N/A':
         return "N/A"
 
-    dividend_dates = _get_historical_dividend_dates(ticker, all_dividends_data)
+    dividend_dates = _get_historical_dividend_dates(ticker, all_dividends_data, cached_history)
 
     if not dividend_dates:
         return "N/A"
