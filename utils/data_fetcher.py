@@ -1,140 +1,134 @@
 import yfinance as yf
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import List, Dict, Any
 
-def get_current_prices(tickers: list) -> dict:
+def get_batch_stock_data(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
     """
-    Fetches the current market price for a list of tickers.
-
-    Args:
-        tickers (list): A list of ticker symbols.
-
-    Returns:
-        dict: A dictionary mapping each ticker to its current price.
-              If a price is not found for a ticker, it will not be included in the dictionary.
+    Fetches market data for multiple tickers in batch.
+    Includes current price and basic info.
     """
-    prices = {}
-    for ticker_symbol in tickers:
-        try:
-            ticker = yf.Ticker(ticker_symbol)
-            price = ticker.fast_info.get("last_price")
-            if price is None:
-                price = ticker.info.get("regularMarketPrice")
+    if not tickers:
+        return {}
+    
+    results = {}
+    # Use Tickers object for consolidated access
+    # Note: price fetching is often faster via download for bulk
+    # but info requires Ticker objects.
+    
+    print(f"DEBUG: Batch fetching prices for {len(tickers)} tickers...")
+    try:
+        # Download latest 1d data to get exact last prices reliably
+        data = yf.download(tickers, period="1d", interval="1m", progress=False, group_by='ticker')
+        
+        for symbol in tickers:
+            symbol_data = {"price": None}
+            try:
+                if len(tickers) > 1:
+                    ticker_df = data[symbol]
+                else:
+                    ticker_df = data
+                
+                if not ticker_df.empty:
+                    # Get last Close price
+                    symbol_data["price"] = float(ticker_df['Close'].iloc[-1])
+            except Exception as e:
+                print(f"Warning: Could not get price for {symbol}: {e}")
             
-            if price:
-                prices[ticker_symbol] = price
-            else:
-                print(f"Warning: Could not find a price for {ticker_symbol}")
+            results[symbol] = symbol_data
+            
+    except Exception as e:
+        print(f"Error in batch price download: {e}")
+        # Fallback to empty prices
+        for s in tickers: results[s] = {"price": None}
 
+    return results
+
+def get_ticker_info_batch(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
+    """
+    Fetches static info (name, sector, currency, forward dividend) for tickers.
+    Warning: .info is slow in yfinance as it makes a web request per ticker.
+    """
+    info_results = {}
+    if not tickers:
+        return info_results
+
+    print(f"DEBUG: Fetching detailed info for {len(tickers)} tickers (this may take a while)...")
+    ticker_objs = yf.Tickers(" ".join(tickers))
+    
+    for symbol in tickers:
+        try:
+            t = ticker_objs.tickers[symbol]
+            info = t.info
+            info_results[symbol] = {
+                "name": info.get("longName") or info.get("shortName"),
+                "sector": info.get("sector"),
+                "industry": info.get("industry"),
+                "currency": info.get("currency"),
+                "forward_dividend": info.get("dividendRate") or info.get("forwardAnnualDividendRate") or 0.0
+            }
         except Exception as e:
-            print(f"Error fetching price for {ticker_symbol}: {e}")
-
-    return prices
+            print(f"Warning: Could not fetch info for {symbol}: {e}")
+            info_results[symbol] = {}
+            
+    return info_results
 
 def get_batch_historical_rates(from_currency: str, to_currency: str, start_date: str, end_date: str) -> pd.DataFrame:
     """
-    Fetches a DataFrame of historical exchange rates for a given period.
-
-    Args:
-        from_currency (str): The currency to convert from.
-        to_currency (str): The currency to convert to.
-        start_date (str): The start date in 'YYYY-MM-DD' format.
-        end_date (str): The end date in 'YYYY-MM-DD' format.
-
-    Returns:
-        pd.DataFrame: A DataFrame with the historical exchange rates, or an empty DataFrame if not found.
+    Fetches historical exchange rates.
     """
     if from_currency == to_currency:
-        # Return a DataFrame with a constant rate of 1.0 for same currency conversion
-        dates = pd.to_datetime([start_date, end_date])
-        date_range = pd.date_range(start=dates[0], end=dates[1], freq='D')
-        return pd.DataFrame({'Close': 1.0}, index=date_range)
+        dates = pd.date_range(start=start_date, end=end_date, freq='D')
+        return pd.DataFrame({'Close': 1.0}, index=dates)
 
     ticker_symbol = f"{from_currency}{to_currency}=X"
+    try:
+        data = yf.download(ticker_symbol, start=start_date, end=end_date, progress=False, auto_adjust=True)
+        return data
+    except Exception as e:
+        print(f"Error fetching rates for {ticker_symbol}: {e}")
+        return pd.DataFrame()
+
+def get_batch_history_data(tickers: List[str], period: str = "5y") -> pd.DataFrame:
+    """
+    Fetches historical data (Prices, Dividends, Splits) for multiple tickers in ONE call.
+    """
+    if not tickers:
+        return pd.DataFrame()
     
+    print(f"DEBUG: Batch fetching {period} history for {len(tickers)} tickers...")
     try:
         data = yf.download(
-            ticker_symbol,
-            start=start_date,
-            end=end_date,
-            progress=False,
-            auto_adjust=True,
-            group_by='ticker'
+            tickers, 
+            period=period, 
+            actions=True, 
+            progress=False, 
+            group_by='ticker',
+            auto_adjust=False
         )
         
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.droplevel(0)
-        
-        if 'Close' in data.columns:
-            data['Close'] = pd.to_numeric(data['Close'], errors='coerce')
+        # Ensure we return a format that the caller expects even if some tickers failed
+        if len(tickers) == 1:
+            return data
             
         return data
     except Exception as e:
-        print(f"Error fetching batch historical rates for {ticker_symbol}: {e}")
+        print(f"Error in batch history download: {e}")
         return pd.DataFrame()
 
-def get_forward_dividend_from_yfinance(ticker: str) -> float:
+def get_ticker_history_and_obj(ticker: str) -> Any:
     """
-    Gets the forward dividend rate from yfinance for a given ticker.
-
-    Args:
-        ticker (str): The ticker symbol.
-
-    Returns:
-        float: The forward dividend rate, or 0.0 if not available.
+    Returns the yfinance Ticker object.
     """
-    try:
-        stock = yf.Ticker(ticker)
-        dividend_rate = stock.info.get('dividendRate')
-        if dividend_rate:
-            return dividend_rate
-        
-        # Fallback to forwardAnnualDividendRate if dividendRate is not available
-        dividend_rate = stock.info.get('forwardAnnualDividendRate')
-        if dividend_rate:
-            return dividend_rate
-            
-        return 0.0
-    except Exception as e:
-        print(f"Error fetching forward dividend for {ticker}: {e}")
-        return 0.0
+    return yf.Ticker(ticker)
 
-def get_ticker_history(ticker: str, period: str = "max") -> pd.DataFrame:
+def get_ticker_history(ticker: str, period: str = "5y") -> pd.DataFrame:
     """
-    Gets historical market data from yfinance for a given ticker.
-
-    Args:
-        ticker (str): The ticker symbol.
-        period (str): The period to fetch data for (e.g., "1y", "5y", "max").
-
-    Returns:
-        pd.DataFrame: A pandas DataFrame with historical data, or an empty DataFrame if not available.
+    Gets historical market data.
     """
     try:
         stock = yf.Ticker(ticker)
-        history = stock.history(period=period)
-        return history
+        return stock.history(period=period)
     except Exception as e:
-        print(f"Error fetching historical data for {ticker}: {e}")
+        print(f"Error fetching history for {ticker}: {e}")
         return pd.DataFrame()
-
-def get_currency_from_yfinance(ticker: str) -> str:
-    """
-    Gets the currency from yfinance for a given ticker.
-
-    Args:
-        ticker (str): The ticker symbol.
-
-    Returns:
-        str: The currency code (e.g., 'USD', 'EUR'), or empty string if not available.
-    """
-    try:
-        stock = yf.Ticker(ticker)
-        currency = stock.info.get('currency')
-        if currency:
-            return currency.upper()
-        return ''
-    except Exception as e:
-        print(f"Error fetching currency for {ticker}: {e}")
-        return ''
-
