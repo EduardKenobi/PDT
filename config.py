@@ -10,6 +10,7 @@ EXIT_CODE_RETURN_TO_MENU = 10
 CHOICE_EXIT = 'Exit'
 CHOICE_STOCK_SUMMARY = 'Stock Summary'
 CHOICE_PORTFOLIO_SUMMARY = 'Portfolio Summary'
+CHOICE_PORTFOLIO_HISTORY = 'Portfolio History'
 CHOICE_RUN_PARSER = 'Run Parser'
 CHOICE_RUN_UPDATER = 'Run Updater'
 CHOICE_RUN_ANALYZER = 'Run Analyzer'
@@ -85,4 +86,16 @@ IBKR_EXCHANGE_MAP = {
     # 'FWB': '.F',  # Frankfurt
     # 'XETRA': '.DE',
     # 'TSE': '.TO', # Toronto
+}
+
+# --- Dividend Frequencies ---
+DIVIDEND_FREQ_MAP = {
+    'Monthly': 12,
+    'Quarterly': 4,
+    'Quarterly-Regulary': 4,
+    'Quarterly-Unregulary': 4,
+    'Quartely-Regulary': 4, # legacy typo support
+    'Quartely-Unregulary': 4, # legacy typo support
+    'Semi-Annually': 2,
+    'Annually': 1
 }

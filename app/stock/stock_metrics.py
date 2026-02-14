@@ -1,9 +1,10 @@
 import pandas as pd
 from datetime import datetime, timedelta
 from app.portfolio.portfolio_metrics import get_rate_from_cache
-from config import PRIMARY_CURRENCY
+from config import PRIMARY_CURRENCY, DIVIDEND_FREQ_MAP
 from calendar import month_name
 from typing import List, Dict, Optional
+from utils.analytics import calculate_cagr
 def _get_historical_dividend_dates(ticker: str, all_dividends_data: dict, cached_history: Optional[List[str]] = None) -> List[datetime]:
     """
     Gets a reliable list of historical dividend dates.
@@ -73,6 +74,24 @@ def calculate_average_dividend_yield(ticker, history_df):
 
     return sum(annual_yields) / len(annual_yields)
 
+def _calculate_annualized_dividend_at(ref_date: datetime, dividends: pd.Series, freq: Optional[int]) -> float:
+    """
+    Calculates the annualized dividend at a specific point in time.
+    Uses (last_payment * frequency) if frequency is known, otherwise fallback to trailing 12m sum.
+    """
+    # Look at dividends strictly BEFORE ref_date
+    past_divs = dividends[dividends.index < ref_date]
+    if past_divs.empty:
+        return 0.0
+            
+    if freq:
+        # Robust method: Last payment * Freq
+        return float(past_divs.iloc[-1] * freq)
+    else:
+        # Fallback: Trailing 12 months sum
+        t12m_start = ref_date - pd.DateOffset(months=12)
+        return float(past_divs[past_divs.index >= t12m_start].sum())
+
 def calculate_dividend_growth(history_df, div_frequency_str):
     """
     Calculates dividend growth for various periods: TTM, and 3, 5, 10-year CAGR.
@@ -102,52 +121,29 @@ def calculate_dividend_growth(history_df, div_frequency_str):
     if dividends.index.tz is not None:
         dividends.index = dividends.index.tz_localize(None)
 
-    # --- TTM Growth Calculation (Forward Dividend Method) ---
-    freq_map = {
-        'Monthly': 12,
-        'Quarterly': 4,
-        'Quarterly-Regulary': 4,
-        'Quarterly-Unregulary': 4,
-        'Quartely-Regulary': 4, # legacy typo support
-        'Quartely-Unregulary': 4, # legacy typo support
-        'Semi-Annually': 2,
-        'Annually': 1
-    }
-    freq = freq_map.get(div_frequency_str)
+    # Deduplicate by date: if multiple entries exist for the same day (across brokers/accounts), take the max one (usually the base DPS).
+    dividends = dividends.groupby(level=0).max()
 
-    if freq is not None:
-        today = datetime.now()
-        one_year_ago = today - pd.DateOffset(years=1)
-
-        divs_today = dividends[dividends.index < today]
-        fwd_div_today = divs_today.iloc[-1] * freq if not divs_today.empty else 0
-
-        divs_1y_ago = dividends[dividends.index < one_year_ago]
-        fwd_div_1y_ago = divs_1y_ago.iloc[-1] * freq if not divs_1y_ago.empty else 0
-
-        if fwd_div_1y_ago > 0:
-            growth_amount = fwd_div_today - fwd_div_1y_ago
-            growth_percentage = (growth_amount / fwd_div_1y_ago)
-            growth_metrics['ttm'] = (growth_amount, growth_percentage)
-        elif fwd_div_today > 0:
-            growth_metrics['ttm'] = (fwd_div_today, None)  # New dividend
-
-    # --- CAGR Calculation (Sum-based Method) ---
+    freq = DIVIDEND_FREQ_MAP.get(div_frequency_str)
     today = datetime.now()
-    t12m_start = today - pd.DateOffset(months=12)
-    sum_t12m = dividends[(dividends.index >= t12m_start) & (dividends.index < today)].sum()
-    div_end_period = sum_t12m
 
+    # --- Calculation for periods ---
+    div_now = _calculate_annualized_dividend_at(today, dividends, freq)
+    
+    # 1. TTM Growth
+    div_1y_ago = _calculate_annualized_dividend_at(today - pd.DateOffset(years=1), dividends, freq)
+    if div_1y_ago > 0:
+        growth_amount = div_now - div_1y_ago
+        growth_percentage = (growth_amount / div_1y_ago)
+        growth_metrics['ttm'] = (growth_amount, growth_percentage)
+    elif div_now > 0:
+        growth_metrics['ttm'] = (div_now, None)
+
+    # 2. CAGR Calculation (3, 5, 10 years)
     for years in [3, 5, 10]:
-        start_period_end = today - pd.DateOffset(months=years * 12)
-        start_period_start = start_period_end - pd.DateOffset(months=12)
-
-        div_start_period = dividends[(dividends.index >= start_period_start) & (dividends.index < start_period_end)].sum()
-
-        if div_start_period > 0 and div_end_period > 0:
-            total_growth_ratio = div_end_period / div_start_period
-            cagr = (total_growth_ratio ** (1 / years)) - 1
-            growth_metrics[f'{years}y'] = cagr
+        div_then = _calculate_annualized_dividend_at(today - pd.DateOffset(years=years), dividends, freq)
+        if div_then > 0 and div_now > 0:
+            growth_metrics[f'{years}y'] = calculate_cagr(div_now, div_then, years)
 
     return growth_metrics
 
@@ -366,7 +362,7 @@ def predict_dividend_income_calendar(
     
     projected_income_calendar = {}
     
-    today = datetime.now().replace(day=1)
+    today = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     time_limit = today + pd.DateOffset(months=timeframe_months)
 
     for ticker, details in all_tickers_data.items():

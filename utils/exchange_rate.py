@@ -34,15 +34,18 @@ def get_rate_from_cache(cache: dict, from_currency: str, to_currency: str, date_
         return None
 
     # Identify date column and set as index if needed
-    date_col = next((c for c in ['Date', 'index'] if c in rate_df.columns), None)
+    # Yahoo download with multi-index can result in weird column names like "('Date', '')"
+    date_col = next((c for c in rate_df.columns if 'Date' in str(c)), None)
     if date_col:
         rate_df[date_col] = pd.to_datetime(rate_df[date_col])
         rate_df.set_index(date_col, inplace=True)
     
     if not isinstance(rate_df.index, pd.DatetimeIndex):
         try:
+            # Maybe the index itself is date-like strings
             rate_df.index = pd.to_datetime(rate_df.index)
         except Exception:
+            # If still not DatetimeIndex, this cache entry is unusable
             return None
 
     # CRITICAL: Index must be sorted for get_indexer with method='nearest'
@@ -62,8 +65,8 @@ def get_rate_from_cache(cache: dict, from_currency: str, to_currency: str, date_
         rate_col = next((c for c in ['Rate', 'Close', 'Adj Close'] if c in rate_df.columns), None)
         
         if not rate_col:
-            # Fallback to any column that contains 'Close'
-            rate_col = next((c for c in rate_df.columns if 'Close' in c), None)
+            # Fallback to any column that contains 'Close' (handles tuple strings like "('Close', 'USD...=X')")
+            rate_col = next((c for c in rate_df.columns if 'Close' in str(c)), None)
             
         if not rate_col:
             return None

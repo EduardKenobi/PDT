@@ -35,7 +35,7 @@ def process_batch_metrics(symbol: str, ticker_df: pd.DataFrame, freq: str = "Qua
     Calculates dynamic metrics from a pre-fetched ticker DataFrame.
     """
     if ticker_df.empty:
-        return {"price": None, "avg_yield_5y": 0, "growth": {}, "dividend_dates": []}
+        return {"price": None, "avg_yield_5y": 0, "growth": {}, "dividend_dates": [], "monthly_prices": {}}
     
     ticker_df = ticker_df.copy()
     # Ensure numeric types for critical columns
@@ -44,7 +44,7 @@ def process_batch_metrics(symbol: str, ticker_df: pd.DataFrame, freq: str = "Qua
             ticker_df[col] = pd.to_numeric(ticker_df[col], errors='coerce')
     try:
         if 'Close' not in ticker_df.columns:
-            return {"price": None, "avg_yield_5y": 0, "growth": {}, "dividend_dates": []}
+            return {"price": None, "avg_yield_5y": 0, "growth": {}, "dividend_dates": [], "monthly_prices": {}}
         cleaned_close = ticker_df['Close'].dropna()
         current_price = float(cleaned_close.iloc[-1]) if not cleaned_close.empty else None
     except Exception:
@@ -63,11 +63,23 @@ def process_batch_metrics(symbol: str, ticker_df: pd.DataFrame, freq: str = "Qua
         except Exception:
             div_dates = []
     
+    # Monthly Prices (End of Month)
+    monthly_prices = {}
+    try:
+        # Resample to month end and get the last price of each month
+        resampled = ticker_df['Close'].resample('ME').last()
+        for date, price in resampled.items():
+            if pd.notna(price):
+                monthly_prices[date.strftime('%Y-%m-%d')] = float(price)
+    except Exception as e:
+        print(f"Warning: Could not calculate monthly prices for {symbol}: {e}")
+
     return {
         "price": current_price,
         "avg_yield_5y": avg_yield,
         "growth": growth,
         "dividend_dates": div_dates,
+        "monthly_prices": monthly_prices,
         "last_update": datetime.now().isoformat()
     }
 
