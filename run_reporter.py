@@ -12,9 +12,10 @@ from rich.table import Table
 from rich.text import Text
 from rich import box 
 
-from config import PRIMARY_CURRENCY, EXIT_CODE_RETURN_TO_MENU, CHOICE_EXIT, CHOICE_STOCK_SUMMARY, CHOICE_PORTFOLIO_SUMMARY
+from config import PRIMARY_CURRENCY, EXIT_CODE_RETURN_TO_MENU, CHOICE_EXIT, CHOICE_STOCK_SUMMARY, CHOICE_PORTFOLIO_SUMMARY, CHOICE_PORTFOLIO_HISTORY, STOCK_ANALYSIS_OUTPUT
 from utils.data_loader import load_analysis_output, load_dividends_data, load_market_data
 from app.portfolio.portfolio_metrics import get_portfolio_dividends_per_quarter
+from utils.analytics import calculate_yoy
 
 def _format_free_cash(free_cash_by_currency: Dict) -> str:
     """Formats the free cash dictionary into a string for display."""
@@ -70,6 +71,91 @@ def print_portfolio_summary_rich(console: Console, portfolio_summary: Dict):
 
     console.print(perf_table)
     console.print(div_table)
+
+def print_portfolio_history_rich(console: Console, portfolio_history: List[Dict]):
+    """
+    Prints the portfolio history table.
+    """
+    if not portfolio_history:
+        console.print("[yellow]No portfolio history data available.[/yellow]")
+        return
+
+    table = Table(title="Portfolio History", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Date", style="cyan", no_wrap=True)
+    table.add_column("Deposit", justify="right", style="white")
+    table.add_column("Contributions", justify="right", style="white")
+    table.add_column("Dividends", justify="right", style="white")
+    table.add_column("PADI", justify="right", style="cyan")
+    table.add_column("YoY", justify="right", style="dim white")
+    table.add_column("3Y CAGR", justify="right", style="dim white")
+    table.add_column("5Y CAGR", justify="right", style="dim white")
+    table.add_column("Density", justify="right", style="dim white")
+    table.add_column("Invested Amount", justify="right", style="white")
+    table.add_column("Unrealized Gain", justify="right")
+    table.add_column("Total Gain %", justify="right")
+    table.add_column("Total Amount", justify="right", style="bold white")
+    table.add_column("YoY", justify="right", style="dim white")
+    table.add_column("3Y CAGR", justify="right", style="dim white")
+    table.add_column("5Y CAGR", justify="right", style="dim white")
+    table.add_column("DEH", justify="right", style="bold white")
+
+    for h in portfolio_history:
+        unrealized_gain = h['unrealized_gain']
+        unrealized_gain_str = f"{unrealized_gain:+,.2f} {PRIMARY_CURRENCY}"
+        unrealized_gain_render = f"[green]{unrealized_gain_str}[/green]" if unrealized_gain > 0 else f"[red]{unrealized_gain_str}[/red]" if unrealized_gain < 0 else unrealized_gain_str
+        
+        total_gain_perc = h.get('total_gain_perc', 0)
+        total_gain_str = f"{total_gain_perc:+.2%}"
+        total_gain_render = f"[green]{total_gain_str}[/green]" if total_gain_perc > 0 else f"[red]{total_gain_str}[/red]" if total_gain_perc < 0 else total_gain_str
+
+        padi_yoy = h.get('padi_yoy', 0)
+        padi_yoy_render = f"[green]{padi_yoy:+.1%}[/green]" if padi_yoy > 0 else f"[red]{padi_yoy:+.1%}[/red]" if padi_yoy < 0 else f"{padi_yoy:+.1%}"
+        
+        padi_3y = h.get('padi_cagr_3y', 0)
+        padi_3y_render = f"[green]{padi_3y:+.1%}[/green]" if padi_3y > 0 else f"[red]{padi_3y:+.1%}[/red]" if padi_3y < 0 else f"{padi_3y:+.1%}"
+        
+        padi_5y = h.get('padi_cagr_5y', 0)
+        padi_5y_render = f"[green]{padi_5y:+.1%}[/green]" if padi_5y > 0 else f"[red]{padi_5y:+.1%}[/red]" if padi_5y < 0 else f"{padi_5y:+.1%}"
+
+        total_amount_yoy = h.get('total_amount_yoy', 0)
+        total_amount_yoy_render = f"[green]{total_amount_yoy:+.1%}[/green]" if total_amount_yoy > 0 else f"[red]{total_amount_yoy:+.1%}[/red]" if total_amount_yoy < 0 else f"{total_amount_yoy:+.1%}"
+
+        total_amount_3y = h.get('total_amount_cagr_3y', 0)
+        total_amount_3y_render = f"[green]{total_amount_3y:+.1%}[/green]" if total_amount_3y > 0 else f"[red]{total_amount_3y:+.1%}[/red]" if total_amount_3y < 0 else f"{total_amount_3y:+.1%}"
+
+        total_amount_5y = h.get('total_amount_cagr_5y', 0)
+        total_amount_5y_render = f"[green]{total_amount_5y:+.1%}[/green]" if total_amount_5y > 0 else f"[red]{total_amount_5y:+.1%}[/red]" if total_amount_5y < 0 else f"{total_amount_5y:+.1%}"
+    
+        deh = h.get('div_engine_health', 0)
+        deh_render = ""
+        if deh != 0:
+            deh_render = (
+                f"[green]{deh:.2%}[/green]" if deh > 0.07 else
+                f"[yellow]{deh:.2%}[/yellow]" if deh >= 0.04 else
+                f"[red]{deh:.2%}[/red]"
+            )
+
+        table.add_row(
+            h['date'],
+            f"{h['deposit']:+,.2f} {PRIMARY_CURRENCY}",
+            f"{h['total_deposit']:,.2f} {PRIMARY_CURRENCY}",
+            f"{h['total_dividends']:,.2f} {PRIMARY_CURRENCY}",
+            f"{h.get('padi', 0):,.2f} {PRIMARY_CURRENCY}",
+            padi_yoy_render if padi_yoy != 0 else "",
+            padi_3y_render if padi_3y != 0 else "",
+            padi_5y_render if padi_5y != 0 else "",
+            f"{h['padi_total_amount']:+,.2%}",
+            f"{h['invested_amount']:,.2f} {PRIMARY_CURRENCY}",
+            unrealized_gain_render,
+            total_gain_render,
+            f"{h['total_amount']:,.2f} {PRIMARY_CURRENCY}",
+            total_amount_yoy_render if total_amount_yoy != 0 else "",
+            total_amount_3y_render if total_amount_3y != 0 else "",
+            total_amount_5y_render if total_amount_5y != 0 else "",
+            deh_render
+        )
+
+    console.print(table)
 
 def _generate_stock_status_table(details: Dict, price_currency: str) -> Table:
     """
@@ -526,7 +612,7 @@ def print_dividend_history_chart(console: Console, dividends_data: dict, exchang
             if prev_year_quarter in quarterly_divs:
                 prev_amount = quarterly_divs[prev_year_quarter]
                 if prev_amount > 0:
-                    change = (amount - prev_amount) / prev_amount
+                    change = calculate_yoy(amount, prev_amount)
                     if change > 0:
                         change_render = f"[green]+{change:.2%}[/green]"
                     elif change < 0:
@@ -553,6 +639,13 @@ def main():
     portfolio_summary, all_tickers_data = load_analysis_output()
     if portfolio_summary is None or all_tickers_data is None:
         return
+    
+    # Load history from analysis output
+    analysis_data = {}
+    if os.path.exists(STOCK_ANALYSIS_OUTPUT):
+        with open(STOCK_ANALYSIS_OUTPUT, 'r') as f:
+            analysis_data = json.load(f)
+    portfolio_history = analysis_data.get('portfolio_history', [])
 
     dividends_data = load_dividends_data()
     if dividends_data is None:
@@ -566,6 +659,7 @@ def main():
     main_menu_choices = [
         "Stock Summary", 
         "Portfolio Summary",
+        "Portfolio History",
         "Dividend Summary",
         "Dividend History",
         "Exit"
@@ -621,6 +715,9 @@ def main():
             
             elif choice == "Dividend History":
                 print_dividend_history_chart(console, dividends_data, exchange_rate_cache)
+            
+            elif choice == CHOICE_PORTFOLIO_HISTORY:
+                print_portfolio_history_rich(console, portfolio_history)
 
             elif choice == CHOICE_EXIT:
                 print("Exiting reporter.")

@@ -1,3 +1,5 @@
+from .brokers import xtb, ibkr
+
 def get_parser_functions(broker_name: str) -> dict:
     """
     Factory function to retrieve parsing functions for a given broker.
@@ -16,13 +18,11 @@ def get_parser_functions(broker_name: str) -> dict:
         ValueError: If no parser is found for the given broker_name.
     """
     if broker_name.lower() == 'xtb':
-        from .brokers import xtb
         return {
             "get_transactions": xtb.get_transactions_from_excel_files,
             "get_cash_operations": xtb.get_cash_operations_from_excel_files,
         }
     elif broker_name.lower() == 'ibkr':
-        from .brokers import ibkr
         return {
             "get_transactions": ibkr.get_transactions_from_csv_files,
             "get_cash_operations": ibkr.get_cash_operations_from_csv_files,

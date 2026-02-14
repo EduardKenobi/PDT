@@ -9,7 +9,8 @@ from config import (
     TICKER_MAP_FILE, 
     CASH_OPERATIONS_OUTPUT_FILE,
     MARKET_DATA_OUTPUT,
-    CASH_FLOW_CATEGORIZATION_FILE
+    CASH_FLOW_CATEGORIZATION_FILE,
+    STOCK_ANALYSIS_OUTPUT
 )
 
 def convert_df_columns_to_numeric(df, columns):
@@ -157,43 +158,24 @@ def load_market_data() -> dict:
         print(f"Error loading market data: {e}")
         return {}
 
-
-
 def load_analysis_output():
-
     """
-
     Load the analysis output from the JSON file.
-
     """
-
-    from config import STOCK_ANALYSIS_OUTPUT
-
     try:
-
         with open(STOCK_ANALYSIS_OUTPUT, 'r') as f:
-
             analysis_data = json.load(f)
-
         print("Analysis data loaded successfully.")
-
         return analysis_data.get('portfolio_summary'), analysis_data.get('tickers')
 
     except FileNotFoundError:
-
         print(f"Error: Analysis file not found at {STOCK_ANALYSIS_OUTPUT}.")
-
         print("Please run the 'Run Analyzer' option from the main menu first.")
-
         return None, None
 
     except json.JSONDecodeError:
-
         print(f"Error: Could not decode JSON from {STOCK_ANALYSIS_OUTPUT}.")
-
         return None, None
-
-
 
 def load_dividends_data():
 

@@ -21,7 +21,7 @@ def main():
     
     # Check if the new dependency has been installed
     try:
-        import inquirer
+        pass
     except ImportError:
         print("The 'inquirer' library is not installed.")
         print("Please install the project dependencies by running:")

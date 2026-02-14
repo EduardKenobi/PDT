@@ -13,6 +13,7 @@ from config import (
     CASH_OPERATIONS_OUTPUT_FILE,
     IBKR_CASH_BALANCE_OUTPUT_FILE
 )
+from parser.brokers.ibkr import get_ending_cash_balance_from_csv_files
 
 def generate_transaction_id(transaction):
     """
@@ -40,7 +41,6 @@ def run_single_parser(broker_name: str) -> tuple[dict, dict, dict, dict | None]:
         accounts_to_parse = XTB_ACCOUNTS
     elif broker_name == 'ibkr':
         accounts_to_parse = IBKR_ACCOUNTS
-        from parser.brokers.ibkr import get_ending_cash_balance_from_csv_files
         print("Parsing cash balance...")
         cash_balance = get_ending_cash_balance_from_csv_files(accounts_to_parse)
     else:

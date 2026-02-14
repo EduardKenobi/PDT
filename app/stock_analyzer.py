@@ -8,7 +8,8 @@ from app.analyzer_engine import (
     clean_for_json,
     process_all_tickers,
     calculate_portfolio_summary,
-    enrich_ticker_data
+    enrich_ticker_data,
+    calculate_portfolio_history
 )
 
 def prepare_data(transactions_df):
@@ -50,7 +51,14 @@ def main():
 
     all_tickers_data = enrich_ticker_data(all_tickers_data, portfolio_summary)
 
-    output_data = {'portfolio_summary': portfolio_summary, 'tickers': all_tickers_data}
+    # Calculate portfolio history
+    portfolio_history = calculate_portfolio_history(transactions_df, dividends_data, cash_operations_data, market_data, ticker_map_data)
+
+    output_data = {
+        'portfolio_summary': portfolio_summary, 
+        'tickers': all_tickers_data,
+        'portfolio_history': portfolio_history
+    }
     save_analysis_to_json(output_data, STOCK_ANALYSIS_OUTPUT)
 
 if __name__ == '__main__':

@@ -231,7 +231,8 @@ def _process_dividend_row(df, df_iter, index, row, currency):
         'withholding_tax': 0,
         'withholding_tax_rate': 0,
         'amount_per_share': dividend_per_share_data['amount'] if dividend_per_share_data else None,
-        'amount_per_share_currency': dividend_per_share_data['currency'] if dividend_per_share_data else None
+        'amount_per_share_currency': dividend_per_share_data['currency'] if dividend_per_share_data else None,
+        'broker': 'xtb'
     }
             
     try:
@@ -297,7 +298,8 @@ def _parse_cash_operations(input_path, sheet_name, mandatory_columns):
                     'amount': float(row.get('Amount')) if not pd.isna(row.get('Amount')) else None,
                     'currency': currency,
                     'comment': row.get('Comment'),
-                    'user_category': current_type
+                    'user_category': current_type,
+                    'broker': 'xtb'
                 }
                 other_operations.append(operation)
 
@@ -345,7 +347,8 @@ def get_cash_operations_from_excel_files(accounts):
                     'date': dividend.get('date'),
                     'amount': dividend.get('amount'),
                     'currency': dividend.get('currency'),
-                    'comment': f"Dividend for {ticker}"
+                    'comment': f"Dividend for {ticker}",
+                    'broker': 'xtb'
                 })
                 if dividend.get('withholding_tax', 0) != 0:
                     other_cash_operations['other_operations'].append({
@@ -353,7 +356,8 @@ def get_cash_operations_from_excel_files(accounts):
                         'date': dividend.get('date'),
                         'amount': dividend.get('withholding_tax'),
                         'currency': dividend.get('currency'),
-                        'comment': f"Withholding tax for {ticker} dividend"
+                        'comment': f"Withholding tax for {ticker} dividend",
+                        'broker': 'xtb'
                     })
 
     for ticker in dividends_data['companies']:
