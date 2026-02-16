@@ -5,7 +5,8 @@ from config import PRIMARY_CURRENCY, DIVIDEND_FREQ_MAP
 from calendar import month_name
 from typing import List, Dict, Optional
 from utils.analytics import calculate_cagr
-def _get_historical_dividend_dates(ticker: str, all_dividends_data: dict, cached_history: Optional[List[str]] = None) -> List[datetime]:
+
+def get_historical_dividend_dates(ticker: str, all_dividends_data: dict, cached_history: Optional[List[str]] = None) -> List[datetime]:
     """
     Gets a reliable list of historical dividend dates.
     Prioritizes local payment dates. Falls back to cached history.
@@ -180,21 +181,25 @@ def calculate_total_dividends(ticker, all_dividends_data, exchange_rate_cache, p
     return total_dividends, total_tax
 
 
-def get_dividend_payment_months(ticker: str, all_dividends_data: dict, cached_history: List[str] = None) -> List[int]:
+def get_dividend_payment_months(dividend_dates: List[datetime]) -> List[int]:
     """
     Determines the typical months a stock pays dividends based on historical data.
+    Looks at all available history if the recent 2-year window is sparse.
     """
-    dividend_dates = _get_historical_dividend_dates(ticker, all_dividends_data, cached_history)
     if not dividend_dates:
         return []
 
     today = datetime.now()
+    # Try last 2 years first
     recent_dividends = [d for d in dividend_dates if d.year >= today.year - 2]
     
-    if not recent_dividends:
+    # If less than 2 dividends in 2 years, use all available history to find a pattern
+    final_dates = recent_dividends if len(recent_dividends) >= 2 else dividend_dates
+    
+    if not final_dates:
         return []
     
-    payment_months = sorted(list(set([d.month for d in recent_dividends])))
+    payment_months = sorted(list(set([d.month for d in final_dates])))
     return payment_months
 
 
@@ -234,93 +239,54 @@ def get_realized_gain_and_cost(closed_positions: dict, exchange_rate_cache: dict
 
     return total_realized_gain_primary, total_cost_of_closed_positions_primary
 
-def predict_next_dividend_month(ticker: str, all_dividends_data: dict, div_frequency: str, cached_history: List[str] = None) -> str:
-    """
-    Predicts the month and year of the next dividend payment based on historical data.
-    """
-    if not div_frequency or div_frequency == 'N/A':
-        return "N/A"
+def _find_next_month_from_pattern(payment_months: List[int], today: datetime, last_dividend_date: datetime) -> tuple:
+    """Finds the next payment month and predicted year based on a pattern of months."""
+    current_month = today.month
+    predicted_year = today.year
+    
+    next_payment_month = None
+    for month in payment_months:
+        if month >= current_month:
+            next_payment_month = month
+            break
+    
+    if next_payment_month is None:
+        next_payment_month = payment_months[0]
+        predicted_year += 1
+        
+    if next_payment_month == current_month and today.day >= last_dividend_date.day:
+        if current_month in payment_months:
+            current_index = payment_months.index(current_month)
+            next_index = (current_index + 1) % len(payment_months)
+            if next_index < current_index: # wrapped around
+                predicted_year += 1
+            next_payment_month = payment_months[next_index]
+            
+    return next_payment_month, predicted_year
 
-    dividend_dates = _get_historical_dividend_dates(ticker, all_dividends_data, cached_history)
 
-    if not dividend_dates:
+def predict_next_dividend_month(ticker: str, all_dividends_data: dict, div_frequency: str, dividend_dates: List[datetime], payment_months: List[int] = None) -> str:
+    """
+    Predicts the month and year of the next dividend payment based on historical data pattern.
+    Only uses payment_months to determine the next date.
+    """
+    if not div_frequency or div_frequency == 'N/A' or not dividend_dates or not payment_months:
         return "N/A"
 
     today = datetime.now()
-    last_dividend_date = dividend_dates[0]
-
+    
     # Check for future dividend dates already in data
     future_dividends = [d for d in dividend_dates if d > today]
     if future_dividends:
         next_div_date = min(future_dividends)
         return f"{month_name[next_div_date.month]} {next_div_date.year}"
 
-    # --- New logic: Use payment month pattern if enough data ---
-    recent_dividends = [d for d in dividend_dates if d > today - pd.DateOffset(years=2)]
-    
-    freq_map_counts = {
-        'Monthly': 10,
-        'Quartely-Regulary': 6,
-        'Quartely-Unregulary': 4,
-        'Semi-Annually': 3,
-        'Annually': 2
-    }
-    
-    if len(recent_dividends) >= freq_map_counts.get(div_frequency, 99):
-        payment_months = sorted(list(set([d.month for d in recent_dividends])))
-        
-        current_month = today.month
-        predicted_year = today.year
-        
-        next_payment_month = None
-        for month in payment_months:
-            if month >= current_month:
-                next_payment_month = month
-                break
-        
-        if next_payment_month is None and payment_months:
-            next_payment_month = payment_months[0]
-            predicted_year += 1
-            
-        if next_payment_month:
-            if last_dividend_date.month == current_month and today.day >= last_dividend_date.day:
-                if current_month in payment_months:
-                    current_index = payment_months.index(current_month)
-                    next_index = (current_index + 1) % len(payment_months)
-                    if next_index < current_index: # wrapped around
-                        predicted_year += 1
-                    next_payment_month = payment_months[next_index]
+    last_date = dividend_dates[0]
+    month, year = _find_next_month_from_pattern(payment_months, today, last_date)
+    return f"{month_name[month]} {year}"
 
 
-            return f"{month_name[next_payment_month]} {predicted_year}"
-
-    # --- Fallback to simple interval logic ---
-    freq_map_interval = {
-        'Monthly': 1,
-        'Quartely-Regulary': 3,
-        'Quartely-Unregulary': 3,
-        'Semi-Annually': 6,
-        'Annually': 12
-    }
-    
-    month_interval = freq_map_interval.get(div_frequency)
-    
-    if not month_interval:
-        return "N/A"
-
-    predicted_date = last_dividend_date
-    
-    while predicted_date <= today:
-        predicted_date = predicted_date + pd.DateOffset(months=month_interval)
-
-    return f"{month_name[predicted_date.month]} {predicted_date.year}"
-
-
-def _predict_dividend_per_share(
-    future_date: datetime,
-    div_frequency: str,
-    sorted_history: List[Dict]
-) -> Optional[Dict]:
+def _predict_dividend_per_share(future_date: datetime, div_frequency: str, sorted_history: List[Dict]) -> Optional[Dict]:
     """
     Predicts the dividend per share amount and currency for a future payment date.
     Returns a dictionary like {'amount': 0.50, 'currency': 'USD'} or None.
@@ -353,13 +319,10 @@ def _predict_dividend_per_share(
     return {'amount': latest_dividend.get('amount_per_share'), 'currency': latest_dividend.get('amount_per_share_currency')}
 
 
-def predict_dividend_income_calendar(
-    all_tickers_data: Dict,
-    dividends_data: Dict,
-    exchange_rate_cache: Dict,
-    timeframe_months: int = 12
-) -> Dict[str, float]:
-    
+def predict_dividend_income_calendar(all_tickers_data: Dict, dividends_data: Dict, exchange_rate_cache: Dict, timeframe_months: int = 12) -> Dict[str, float]:
+    """
+    Predicts the dividend income calendar for the next 12 months.
+    """
     projected_income_calendar = {}
     
     today = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)

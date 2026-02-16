@@ -11,7 +11,8 @@ from config import (
     TRANSACTIONS_OUTPUT_FILE,
     DIVIDEND_OUTPUT_FILE,
     CASH_OPERATIONS_OUTPUT_FILE,
-    IBKR_CASH_BALANCE_OUTPUT_FILE
+    IBKR_CASH_BALANCE_OUTPUT_FILE,
+    OPEN_TICKERS_FILE
 )
 from parser.brokers.ibkr import get_ending_cash_balance_from_csv_files
 
@@ -161,6 +162,16 @@ def main():
     if ibkr_cash_balance:
         save_data_to_yaml(ibkr_cash_balance, IBKR_CASH_BALANCE_OUTPUT_FILE)
         print(f"IBKR cash balance saved to {IBKR_CASH_BALANCE_OUTPUT_FILE}")
+    
+    # --- Identify and save open tickers ---
+    open_tickers = []
+    for ticker, data in final_transactions.get('companies', {}).items():
+        if any(t.get('type') == 'open' for t in data.get('transactions', [])):
+            open_tickers.append(ticker)
+    
+    with open(OPEN_TICKERS_FILE, 'w') as f:
+        json.dump(sorted(open_tickers), f, indent=4)
+    print(f"Open tickers summary saved to {OPEN_TICKERS_FILE}")
     
     print("\nData parsing complete.")
 

@@ -38,6 +38,7 @@ class ClosedPositionData:
 class TickerData:
     ticker: str
     current_shares: float
+    has_open_position: bool
     market_value_primary: float
     cost_basis_primary_currency: float
     cost_basis_per_currency: Dict[str, float]
@@ -63,11 +64,13 @@ class TickerData:
     closed_positions: List[ClosedPositionData]
     ratio_on_cost: float = 0.0
     ratio_on_padi: float = 0.0
+    ratio_on_market_value: float = 0.0
     name: Optional[str] = None
     sector: Optional[str] = None
     next_dividend_month: Optional[str] = None
     dividend_payment_months: Optional[List[int]] = None
     div_frequency: Optional[str] = None
+    history: List[Dict[str, Any]] = field(default_factory=list)
 
 @dataclass
 class PortfolioSummary:
@@ -98,3 +101,5 @@ class PortfolioSummary:
     free_cash_by_currency: Dict[str, float]
     total_free_cash_primary_currency: float
     projected_dividend_income: Optional[Dict[str, float]] = None
+    dividend_calendar: Dict[str, List[str]] = field(default_factory=dict)
+    quarterly_dividends: Dict[str, float] = field(default_factory=dict)

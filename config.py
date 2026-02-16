@@ -38,14 +38,17 @@ DIVIDEND_OUTPUT_FILE = os.path.join(DATA_DIR, 'dividends.yaml')
 CASH_OPERATIONS_OUTPUT_FILE = os.path.join(DATA_DIR, 'cash_operations.yaml')
 CASH_FLOW_CATEGORIZATION_FILE = os.path.join(DATA_DIR, 'cash_flow_categorization.yaml')
 IBKR_CASH_BALANCE_OUTPUT_FILE = os.path.join(DATA_DIR, 'ibkr_cash_balance.yaml')
+OPEN_TICKERS_FILE = os.path.join(DATA_DIR, 'open_tickers.json')
 
-# Used by app/stock_analyzer.py
+# Used by app/run_analyzer.py
 STOCK_ANALYSIS_OUTPUT = os.path.join(DATA_DIR, 'stock_analysis_output.json')
 TAX_ANALYSIS_OUTPUT = os.path.join(DATA_DIR, 'tax_analysis_output.json')
 
-# Used by update_market_data.py and app/stock_analyzer.py
+# Used by update_market_data.py and app/run_analyzer.py
 MARKET_DATA_OUTPUT = os.path.join(DATA_DIR, 'market_data.json')
 
+# --- Tickers to Ignore ---
+TICKERS_TO_IGNORE = ['SPCE', 'SPCE.US']
 
 # --- Ticker Conversion ---
 XTB_TICKER_CACHE_PATH = os.path.join(DATA_DIR, 'xtb_ticker_cache.json')

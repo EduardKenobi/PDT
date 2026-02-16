@@ -3,6 +3,7 @@ import pandas as pd
 import json
 import ast
 import os
+from app.history.history_helpers import _get_month_ends, _prepare_dividend_history_df
 from config import (
     TRANSACTIONS_OUTPUT_FILE, 
     DIVIDEND_OUTPUT_FILE, 
@@ -95,6 +96,15 @@ def load_flat_yaml_to_dataframe(yaml_path: str, list_key: str) -> pd.DataFrame:
 
     return pd.DataFrame(records)
 
+def prepare_data(transactions_df):
+    """
+    Prepare and filter data for analysis.
+    """
+    transactions_df['open_date_dt'] = pd.to_datetime(transactions_df['open_date'])
+    transactions_df['close_date_dt'] = pd.to_datetime(transactions_df['close_date'])
+    all_tickers = transactions_df['ticker'].unique()
+    return all_tickers
+
 def load_all_data():
     """
     Load all necessary data files with error handling.
@@ -107,11 +117,13 @@ def load_all_data():
         dividends_data = load_yaml(DIVIDEND_OUTPUT_FILE)
         ticker_map_data = load_yaml(TICKER_MAP_FILE)
         cash_operations_data = load_yaml(CASH_OPERATIONS_OUTPUT_FILE)
-        print("All source data loaded successfully.")
-        return transactions_df, dividends_data, ticker_map_data, cash_operations_data
+        all_tickers = prepare_data(transactions_df)
+        month_ends = _get_month_ends()
+        div_df = _prepare_dividend_history_df(dividends_data)
+        return transactions_df, dividends_data, ticker_map_data, cash_operations_data, all_tickers, month_ends, div_df
     except (FileNotFoundError, ValueError) as e:
         print(f"Error loading source data: {e}")
-        return None, None, None, None
+        return None, None, None, None, None, None, None
 
 def rehydrate_data(data):
     """
