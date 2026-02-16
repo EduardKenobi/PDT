@@ -1,11 +1,9 @@
 import json
-import pandas as pd
 from typing import Dict, List
 from datetime import datetime
 import inquirer
 import os
 import sys
-from calendar import month_name
 
 from rich.console import Console
 from rich.table import Table
@@ -13,8 +11,7 @@ from rich.text import Text
 from rich import box 
 
 from config import PRIMARY_CURRENCY, EXIT_CODE_RETURN_TO_MENU, CHOICE_EXIT, CHOICE_STOCK_SUMMARY, CHOICE_PORTFOLIO_SUMMARY, CHOICE_PORTFOLIO_HISTORY, STOCK_ANALYSIS_OUTPUT
-from utils.data_loader import load_analysis_output, load_dividends_data, load_market_data
-from app.portfolio.portfolio_metrics import get_portfolio_dividends_per_quarter
+from utils.data_loader import load_analysis_output, load_dividends_data
 from utils.analytics import calculate_yoy
 
 def _format_free_cash(free_cash_by_currency: Dict) -> str:
@@ -280,9 +277,9 @@ def _generate_ratio_summary_table(details: Dict, portfolio_value: float) -> Tabl
     table.add_column("Metric", style="cyan", no_wrap=True)
     table.add_column("Value", style="white")
 
-    table.add_row("Value Ratio", f"{(div_market_value / portfolio_value):.2%}" if portfolio_value > 0 else "N/A")
-    table.add_row("Cost Ratio", f"{div_ratio_on_cost:.2%}")
-    table.add_row("PADI Ratio", f"{div_ratio_on_padi:.2%}")
+    table.add_row("Value Ratio", f"{details.get('ratio_on_market_value', 0):.2%}")
+    table.add_row("Cost Ratio", f"{details.get('ratio_on_cost', 0):.2%}")
+    table.add_row("PADI Ratio", f"{details.get('ratio_on_padi', 0):.2%}")
 
     return table
 
@@ -420,49 +417,23 @@ def _generate_dividends_history_table(ticker_dividends: List[Dict]) -> Table:
 
     return table
 
-def print_dividend_summary_table_enhanced(console: Console, all_tickers_data: Dict[str, Dict], portfolio_summary: Dict, timeframe_months: int = 12):
+def print_dividend_summary_table_enhanced(console: Console, portfolio_summary: Dict):
     """
     Prints a rich dividend summary calendar based on pre-calculated payment months.
     """
-    dividend_calendar = {}  # { 'Month Year': [Tickers] }
+    dividend_calendar = portfolio_summary.get('dividend_calendar', {})
     projected_income = portfolio_summary.get('projected_dividend_income', {})
     
-    today = datetime.now()
-    # Reset to the beginning of the current day/month (00:00:00) so we capture everything from today onwards
-    today = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    
-    time_limit = today + pd.DateOffset(months=timeframe_months)
-
-    for ticker, details in all_tickers_data.items():
-        if details.get('current_shares', 0) > 0:
-            payment_months = details.get('dividend_payment_months')
-            if not payment_months:
-                continue
-
-            # Project payments for the next years
-            for year_offset in range(2):  # Check current and next year
-                year = today.year + year_offset
-                for month in payment_months:
-                    # Create a representative date for that month/year
-                    try:
-                        payment_date = datetime(year, month, 1)
-                    except ValueError:
-                        continue # Invalid date, e.g., month 0
-
-                    # Check if this date is in the future and within our timeframe
-                    if payment_date >= today and payment_date < time_limit:
-                        month_year_str = f"{month_name[month]} {year}"
-                        if month_year_str not in dividend_calendar:
-                            dividend_calendar[month_year_str] = []
-                        if ticker not in dividend_calendar[month_year_str]:
-                            dividend_calendar[month_year_str].append(ticker)
-
     if not dividend_calendar:
         console.print("[yellow]No upcoming dividends found for owned stocks.[/yellow]")
         return
 
     # Sort by date
-    sorted_months = sorted(dividend_calendar.keys(), key=lambda x: datetime.strptime(x, '%B %Y'))
+    try:
+        sorted_months = sorted(dividend_calendar.keys(), key=lambda x: datetime.strptime(x, '%B %Y'))
+    except Exception:
+        # Fallback to simple sort if date parsing fails
+        sorted_months = sorted(dividend_calendar.keys())
     
     table = Table(title="Dividend Summary", box=box.SIMPLE, show_header=True, header_style="bold cyan")
     table.add_column("Month", style="cyan", no_wrap=True)
@@ -568,22 +539,20 @@ def print_stock_summary_rich(console: Console, all_tickers_data: Dict[str, Dict]
         console.print("[yellow]No owned or sold tickers to display.[/yellow]")
 
 
-def print_dividend_history_chart(console: Console, dividends_data: dict, exchange_rate_cache: dict):
+def print_dividend_history_chart(console: Console, portfolio_summary: Dict):
     """
     Prints a rich horizontal bar chart for quarterly dividends.
     """
-    quarterly_divs = get_portfolio_dividends_per_quarter(dividends_data, exchange_rate_cache, PRIMARY_CURRENCY)
+    quarterly_divs = portfolio_summary.get('quarterly_dividends', {})
     
     if not quarterly_divs:
         console.print("[yellow]No dividends data available.[/yellow]")
         return
 
-    sorted_quarters = sorted(quarterly_divs.keys())
-    if not sorted_quarters:
-        console.print("[yellow]No dividends data available.[/yellow]")
-        return
+    # Sort quarters: first by year (yy), then by quarter number (x)
+    sorted_quarters = sorted(quarterly_divs.keys(), key=lambda x: (int(x.split('/')[1]), int(x[1])))
 
-    max_val = max(quarterly_divs.values())
+    max_val = max(quarterly_divs.values()) if quarterly_divs else 0
     max_width_bars = 40 
 
     table = Table(title="Dividend History (Quarterly)", box=box.SIMPLE, show_header=True, header_style="bold cyan")
@@ -592,23 +561,22 @@ def print_dividend_history_chart(console: Console, dividends_data: dict, exchang
     table.add_column("Amount", justify="right", style="white")
     table.add_column("Y/Y Change", justify="right")
 
-    for i, (year, quarter) in enumerate(sorted_quarters):
-        amount = quarterly_divs[(year, quarter)]
+    for i, quarter_key in enumerate(sorted_quarters):
+        amount = quarterly_divs[quarter_key]
         
         # Calculate bar length
         bar_len = int((amount / max_val) * max_width_bars) if max_val > 0 else 0
         bar_str = "█" * bar_len
         bar_render = f"[{'blue' if i % 2 == 0 else 'dodger_blue1'}]{bar_str}[/]"
         
-        short_year = str(year)[-2:]
-        quarter_str = f"Q{quarter}/{short_year}"
-        
         amount_str = f"{amount:,.2f} {PRIMARY_CURRENCY}"
 
         change_render = ""
         # Y/Y Start from 5th item
         if i >= 4:
-            prev_year_quarter = (year - 1, quarter)
+            # quarter_key format: Q1/24
+            q, y = quarter_key.split('/')
+            prev_year_quarter = f"{q}/{int(y)-1:02d}"
             if prev_year_quarter in quarterly_divs:
                 prev_amount = quarterly_divs[prev_year_quarter]
                 if prev_amount > 0:
@@ -624,7 +592,7 @@ def print_dividend_history_chart(console: Console, dividends_data: dict, exchang
             else:
                  change_render = "[dim]N/A[/dim]"
         
-        table.add_row(quarter_str, bar_render, amount_str, change_render)
+        table.add_row(quarter_key, bar_render, amount_str, change_render)
 
     console.print(table)
 
@@ -640,7 +608,6 @@ def main():
     if portfolio_summary is None or all_tickers_data is None:
         return
     
-    # Load history from analysis output
     analysis_data = {}
     if os.path.exists(STOCK_ANALYSIS_OUTPUT):
         with open(STOCK_ANALYSIS_OUTPUT, 'r') as f:
@@ -650,11 +617,6 @@ def main():
     dividends_data = load_dividends_data()
     if dividends_data is None:
         return
-    
-    market_data = load_market_data()
-    exchange_rate_cache = market_data.get('exchange_rate_cache', {})
-    if not exchange_rate_cache:
-        print("Warning: Exchange rate cache unavailable. Dividend calculations might be inaccurate.")
 
     main_menu_choices = [
         "Stock Summary", 
@@ -686,7 +648,16 @@ def main():
             print(f"--- {choice} ---")
 
             if choice == CHOICE_STOCK_SUMMARY:
-                ticker_choices = ["All"] + sorted(list(all_tickers_data.keys()))
+                # Categorize tickers based on has_open_position flag
+                actual_open = sorted([t for t, data in all_tickers_data.items() if data.get('has_open_position', False)])
+                actual_closed = sorted([t for t in all_tickers_data.keys() if t not in actual_open])
+
+                ticker_choices = ["All"]
+                if actual_open:
+                    ticker_choices.extend(actual_open)
+                if actual_closed:
+                    ticker_choices.extend(actual_closed)
+
                 ticker_questions = [
                     inquirer.List(
                         'ticker',
@@ -711,10 +682,10 @@ def main():
                 print_portfolio_summary_rich(console, portfolio_summary)
 
             elif choice == "Dividend Summary":
-                print_dividend_summary_table_enhanced(console, all_tickers_data, portfolio_summary)
+                print_dividend_summary_table_enhanced(console, portfolio_summary)
             
             elif choice == "Dividend History":
-                print_dividend_history_chart(console, dividends_data, exchange_rate_cache)
+                print_dividend_history_chart(console, portfolio_summary)
             
             elif choice == CHOICE_PORTFOLIO_HISTORY:
                 print_portfolio_history_rich(console, portfolio_history)

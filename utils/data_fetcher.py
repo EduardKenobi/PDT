@@ -89,23 +89,38 @@ def get_batch_historical_rates(from_currency: str, to_currency: str, start_date:
         print(f"Error fetching rates for {ticker_symbol}: {e}")
         return pd.DataFrame()
 
-def get_batch_history_data(tickers: List[str], period: str = "5y") -> pd.DataFrame:
+def get_batch_history_data(tickers: List[str], period: str = "5y", start: str = None) -> pd.DataFrame:
     """
     Fetches historical data (Prices, Dividends, Splits) for multiple tickers in ONE call.
+    Args:
+        tickers: List of ticker symbols
+        period: Relative period (e.g., "5y") - used if start is not provided
+        start: Fixed start date (e.g., "2021-01-01") - takes precedence over period
     """
     if not tickers:
         return pd.DataFrame()
     
-    print(f"DEBUG: Batch fetching {period} history for {len(tickers)} tickers...")
     try:
-        data = yf.download(
-            tickers, 
-            period=period, 
-            actions=True, 
-            progress=False, 
-            group_by='ticker',
-            auto_adjust=False
-        )
+        if start:
+            print(f"DEBUG: Batch fetching history from {start} for {len(tickers)} tickers...")
+            data = yf.download(
+                tickers, 
+                start=start, 
+                actions=True, 
+                progress=False, 
+                group_by='ticker',
+                auto_adjust=False
+            )
+        else:
+            print(f"DEBUG: Batch fetching {period} history for {len(tickers)} tickers...")
+            data = yf.download(
+                tickers, 
+                period=period, 
+                actions=True, 
+                progress=False, 
+                group_by='ticker',
+                auto_adjust=False
+            )
         
         # Ensure we return a format that the caller expects even if some tickers failed
         if len(tickers) == 1:

@@ -30,8 +30,8 @@ def main():
 
     menu_choices = {
         CHOICE_RUN_PARSER: lambda: run_script("run_parser.py"),
-        CHOICE_RUN_UPDATER: lambda: run_script("update_market_data.py"),
-        CHOICE_RUN_ANALYZER: lambda: run_script("app.stock_analyzer", module=True),
+        CHOICE_RUN_UPDATER: lambda: run_script("run_updater.py"),
+        CHOICE_RUN_ANALYZER: lambda: run_script("run_analyzer.py"),
         CHOICE_RUN_REPORTER: lambda: run_script("run_reporter.py"),
         CHOICE_RUN_TAXER: lambda: run_script("app.taxes.tax", module=True),
         CHOICE_EXIT: lambda: print("Exiting application.")

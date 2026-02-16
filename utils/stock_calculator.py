@@ -81,3 +81,91 @@ def calculate_padi_value(shares: float, amount_per_share: Optional[float], frequ
     if shares > 0 and amount_per_share and frequency > 0:
         return shares * amount_per_share * frequency
     return 0.0
+
+def calculate_forward_dividend(ticker: str, frequency_type: str, dividends_history: list, currency: str = '') -> float:
+    """
+    Calculates the forward dividend based on frequency type and historical dividend data.
+    
+    Args:
+        ticker (str): The ticker symbol (for logging purposes).
+        frequency_type (str): The dividend frequency type from ticker_map.yaml
+                             (e.g., 'Monthly', 'Quarterly-Regulary', 'Quarterly-Unregulary', 
+                              'Semi-Annually', 'Annually').
+        dividends_history (list): List of dividend payment dictionaries with 'date' and 'amount' keys.
+                                 Expected format: [{"date": "2024-01-15", "amount": 0.50}, ...]
+        currency (str): The currency of the stock (e.g. 'USD', 'EUR', 'GBp'). 
+                       Used to convert GBp (pence) to GBP (pounds) if necessary.
+    
+    Returns:
+        float: The calculated forward dividend, or 0.0 if calculation fails.
+    
+    Logic:
+        - Monthly & Quarterly-Regular: Last payment × Frequency
+        - Quarterly-Unregular & Semi-Annually: Sum of last N payments. If history is insufficient, annualizes the most recent payment.
+        - Annually: Last annual payment
+    """
+    from config import DIVIDEND_FREQ_MAP
+    import logging
+    
+    # Validate inputs
+    if not frequency_type or frequency_type == 'N/A':
+        return 0.0
+    
+    if not dividends_history or len(dividends_history) == 0:
+        logging.warning(f"{ticker}: No dividend history available.")
+        return 0.0
+    
+    # Get frequency multiplier
+    frequency = DIVIDEND_FREQ_MAP.get(frequency_type)
+    if frequency is None:
+        logging.warning(f"{ticker}: Unknown frequency type '{frequency_type}'.")
+        return 0.0
+    
+    # Sort dividends by date (most recent first)
+    try:
+        sorted_dividends = sorted(dividends_history, key=lambda x: x['date'], reverse=True)
+    except (KeyError, TypeError) as e:
+        logging.error(f"{ticker}: Invalid dividend history format: {e}")
+        return 0.0
+    
+    # Calculate based on frequency type
+    forward_div = 0.0
+    try:
+        if frequency_type in ['Monthly', 'Quarterly-Regulary', 'Quartely-Regulary']:
+            # Monthly & Quarterly-Regular: Last payment × Frequency
+            last_payment = sorted_dividends[0]['amount']
+            forward_div = last_payment * frequency
+        
+        elif frequency_type in ['Quarterly-Unregulary', 'Quartely-Unregulary', 'Semi-Annually']:
+            # Quarterly-Unregular & Semi-Annually: Sum of last N payments
+            if len(sorted_dividends) < frequency:
+                logging.warning(
+                    f"{ticker}: Insufficient dividend history for {frequency_type} "
+                    f"(need {frequency}, have {len(sorted_dividends)}). Annualizing last payment."
+                )
+                last_payment = sorted_dividends[0]['amount']
+                forward_div = last_payment * frequency
+            else:
+                last_n_payments = sorted_dividends[:frequency]
+                forward_div = sum(div['amount'] for div in last_n_payments)
+        
+        elif frequency_type == 'Annually':
+            # Annually: Last annual payment
+            last_payment = sorted_dividends[0]['amount']
+            forward_div = last_payment
+        
+        else:
+            logging.warning(f"{ticker}: Unhandled frequency type '{frequency_type}'.")
+            return 0.0
+        
+        # Handle GBp to GBP conversion
+        # Check for GBp/GBP/GBX and if value is likely in pence (> 50 is a safe heuristic for dividend amount)
+        if currency in ['GBp', 'GBP', 'GBX'] and forward_div > 50:
+            forward_div = forward_div / 100.0
+            
+        return forward_div
+            
+    except (KeyError, IndexError, TypeError) as e:
+        logging.error(f"{ticker}: Error calculating forward dividend: {e}")
+        return 0.0
+

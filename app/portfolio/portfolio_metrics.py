@@ -5,6 +5,7 @@ from collections import defaultdict
 from utils.data_loader import load_yaml
 from config import PRIMARY_CURRENCY, CASH_OPERATIONS_OUTPUT_FILE, IBKR_CASH_BALANCE_OUTPUT_FILE
 from utils.exchange_rate import get_rate_from_cache, normalize_currency
+from utils.analytics import convert_currency
 
 def calculate_free_cash_by_currency(cash_operations_data: dict) -> dict:
     """
@@ -117,113 +118,55 @@ def get_other_cash_operations_summary(exchange_rate_cache: dict) -> dict:
 
     return operation_sums
 
-def get_portfolio_dividends_per_year(all_dividends_data: dict, exchange_rate_cache: dict, primary_currency: str) -> dict[int, float]:
+def get_portfolio_dividends_per_year(div_df: pd.DataFrame, exchange_rate_cache: dict) -> dict[int, float]:
     """
     Calculates the total portfolio dividends for each year in the primary currency.
     """
-    portfolio_dividends_by_year = {}
+    if div_df.empty:
+        return {}
 
-    if not all_dividends_data:
-        return portfolio_dividends_by_year
+    df = div_df.copy()
+    df['amount_primary'] = df.apply(
+        lambda r: convert_currency(r['amount'], r['currency'], PRIMARY_CURRENCY, r['date'].strftime('%Y-%m-%d'), exchange_rate_cache, get_rate_from_cache), 
+        axis=1
+    )
+    df['year'] = df['date'].dt.year
+    return df.groupby('year')['amount_primary'].sum().to_dict()
 
-    for ticker, company_data in all_dividends_data.get('companies', {}).items():
-        for dividend in company_data.get('dividends', []):
-            amount = dividend.get('amount', 0)
-            currency = normalize_currency(dividend.get('currency'))
-            date_str = dividend.get('date')
-
-            if not currency or not date_str or not amount:
-                continue
-
-            try:
-                dividend_date = datetime.strptime(date_str, '%Y-%m-%d')
-                year = dividend_date.year
-            except ValueError:
-                continue
-
-            converted_amount = amount
-            if currency != primary_currency:
-                rate = get_rate_from_cache(exchange_rate_cache, currency, primary_currency, date_str)
-                if rate:
-                    converted_amount *= rate
-                else:
-                    continue
-            
-            portfolio_dividends_by_year[year] = portfolio_dividends_by_year.get(year, 0) + converted_amount
-
-    return portfolio_dividends_by_year
-
-def get_portfolio_dividends_ltm(all_dividends_data: dict, exchange_rate_cache: dict, primary_currency: str) -> float:
+def get_portfolio_dividends_ltm(div_df: pd.DataFrame, exchange_rate_cache: dict) -> float:
     """
     Calculates the portfolio dividends from last twelve months.
     """
-    portfolio_dividends_ltm = 0
-    today = datetime.now()
+    if div_df.empty:
+        return 0.0
+        
+    today = pd.Timestamp.now()
     t12m_start = today - pd.DateOffset(months=12)
-
-    if not all_dividends_data:
-        return portfolio_dividends_ltm
     
-    for ticker, company_data in all_dividends_data.get('companies', {}).items():
-        for dividend in company_data.get('dividends', []):
-            amount = dividend.get('amount', 0)
-            currency = normalize_currency(dividend.get('currency'))
-            date_str = dividend.get('date')
+    mask = (div_df['date'] >= t12m_start) & (div_df['date'] <= today)
+    ltm_df = div_df[mask].copy()
+    
+    if ltm_df.empty:
+        return 0.0
 
-            if not currency or not date_str or not amount:
-                continue
-            
-            try:
-                  dividend_date = datetime.strptime(date_str, '%Y-%m-%d')
-            except ValueError:
-                  continue
-            
-            if t12m_start <= dividend_date <= today:
-                converted_amount = amount
-                if currency != primary_currency:
-                    rate = get_rate_from_cache(exchange_rate_cache, currency, primary_currency, date_str)
-                    if rate:
-                        converted_amount *= rate
-                    else:
-                        continue
-                
-                portfolio_dividends_ltm += converted_amount
+    ltm_df['amount_primary'] = ltm_df.apply(
+        lambda r: convert_currency(r['amount'], r['currency'], PRIMARY_CURRENCY, r['date'].strftime('%Y-%m-%d'), exchange_rate_cache, get_rate_from_cache), 
+        axis=1
+    )
+    return float(ltm_df['amount_primary'].sum())
 
-    return portfolio_dividends_ltm
-
-def get_portfolio_dividends_per_quarter(all_dividends_data: dict, exchange_rate_cache: dict, primary_currency: str) -> dict[tuple[int, int], float]:
+def get_portfolio_dividends_per_quarter(div_df: pd.DataFrame, exchange_rate_cache: dict) -> dict[tuple[int, int], float]:
     """
     Calculates the total portfolio dividends for each quarter in the primary currency.
     """
-    portfolio_dividends_by_quarter = defaultdict(float)
+    if div_df.empty:
+        return {}
 
-    if not all_dividends_data:
-        return dict(portfolio_dividends_by_quarter)
-
-    for ticker, company_data in all_dividends_data.get('companies', {}).items():
-        for dividend in company_data.get('dividends', []):
-            amount = dividend.get('amount', 0)
-            currency = normalize_currency(dividend.get('currency'))
-            date_str = dividend.get('date')
-
-            if not currency or not date_str or not amount:
-                continue
-
-            try:
-                dividend_date = datetime.strptime(date_str, '%Y-%m-%d')
-                year = dividend_date.year
-                quarter = (dividend_date.month - 1) // 3 + 1
-            except ValueError:
-                continue
-
-            converted_amount = amount
-            if currency != primary_currency:
-                rate = get_rate_from_cache(exchange_rate_cache, currency, primary_currency, date_str)
-                if rate:
-                    converted_amount *= rate
-                else:
-                    continue
-            
-            portfolio_dividends_by_quarter[(year, quarter)] += converted_amount
-
-    return dict(portfolio_dividends_by_quarter)
+    df = div_df.copy()
+    df['amount_primary'] = df.apply(
+        lambda r: convert_currency(r['amount'], r['currency'], PRIMARY_CURRENCY, r['date'].strftime('%Y-%m-%d'), exchange_rate_cache, get_rate_from_cache), 
+        axis=1
+    )
+    df['year'] = df['date'].dt.year
+    df['quarter'] = df['date'].dt.quarter
+    return df.groupby(['year', 'quarter'])['amount_primary'].sum().to_dict()
