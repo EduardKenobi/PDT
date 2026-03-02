@@ -102,3 +102,42 @@ DIVIDEND_FREQ_MAP = {
     'Semi-Annually': 2,
     'Annually': 1
 }
+
+# --- Analysis Tiers ---
+TIER1 = 'Tier 1'
+TIER2 = 'Tier 2'
+TIER3 = 'Tier 3'
+TIERG = 'Tier G'
+SAFETY_MARGIN = 0.10  # 10% safety margin for all tiers
+MIN_5Y_DIVIDEND_GROWTH = 0.025  # Minimum dividend growth rate (2.5%)
+
+ANALYSIS_MAP = {
+    TIER1: {
+        'name': 'Tier 1 - Core Holdings',
+        'description': 'Your main long-term investments. These are the stocks you plan to hold for several years and are the foundation of your portfolio.',
+        'criteria': 'Typically, these are well-established companies with strong fundamentals, consistent dividend payments, and a history of stable growth. They may include blue-chip stocks, dividend aristocrats, or companies in sectors you believe will perform well over the long term.',
+        'PADI_target': 0.08,  # Example target PADI for Tier 1 stocks
+        'market_value_target': 0.07,  # Example target market value percentage for Tier 1 stocks
+    },
+    TIER2: {
+        'name': 'Tier 2 - Growth Holdings',
+        'description': 'These are stocks that you expect to grow faster than your Tier 1 holdings but are not yet core holdings.',
+        'criteria': 'Typically, these are growth stocks in emerging sectors or companies with high growth potential but may be more volatile or cyclical than Tier 1 holdings.',
+        'PADI_target': 0.05,  # Example target PADI for Tier 2 stocks
+        'market_value_target': 0.15,  # Example target market value percentage for Tier 2 stocks
+    },
+    TIER3: {
+        'name': 'Tier 3 - Capped Income',
+        'description': 'These are stocks that you want to include in your portfolio for diversification or potential high returns but want to limit their overall impact on your portfolio\'s income and risk profile.',
+        'criteria': 'Typically, these are stocks that may have higher risk, lower dividend yields, or are in sectors you want to limit exposure to. You want to ensure that even if these stocks perform poorly or cut dividends, they won\'t significantly impact your overall portfolio income or risk.',
+        'PADI_target': 0.04,  # Example target PADI for Tier 3 stocks
+        'market_value_target': 0.03,  # Example target market value percentage for Tier 3 stocks
+    },
+    TIERG: {
+        'name': 'Tier G - Growth Only',
+        'description': 'These are stocks that you want to include in your portfolio for growth potential but do not want to contribute to your portfolio\'s income.',
+        'criteria': 'Typically, these are growth stocks that may have little to no dividend yield but have strong growth potential. You want to ensure that even if these stocks perform well, they won\'t significantly impact your overall portfolio income, as you are not relying on them for dividends.',
+        'PADI_target': 0.00,  # Target PADI for Tier G stocks (growth only)
+        'market_value_target': 0.10,  # Example target market value percentage for Tier G stocks
+    }
+}

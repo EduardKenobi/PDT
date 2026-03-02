@@ -1,6 +1,7 @@
 import pandas as pd
 from datetime import datetime
 from collections import defaultdict
+from calendar import month_name
 
 from utils.data_loader import load_yaml
 from config import PRIMARY_CURRENCY, CASH_OPERATIONS_OUTPUT_FILE, IBKR_CASH_BALANCE_OUTPUT_FILE
@@ -170,3 +171,79 @@ def get_portfolio_dividends_per_quarter(div_df: pd.DataFrame, exchange_rate_cach
     df['year'] = df['date'].dt.year
     df['quarter'] = df['date'].dt.quarter
     return df.groupby(['year', 'quarter'])['amount_primary'].sum().to_dict()
+
+def get_portfolio_dividend_calendar(all_tickers_data: dict, today: pd.Timestamp) -> dict[str, list[str]]:
+    """
+    Creates a dividend calendar mapping each month to the list of tickers paying dividends in that month.
+    """
+    # Pre-calculate Dividend Calendar for Reporter
+    dividend_calendar = {}
+    timeframe_months = 12
+    # Reset to the beginning of the current day/month (00:00:00) so we capture everything from today onwards
+    cal_today = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    time_limit = cal_today + pd.DateOffset(months=timeframe_months)
+
+    for ticker, data in all_tickers_data.items():
+        if data.current_shares > 0:
+            payment_months = data.dividend_payment_months
+            if not payment_months:
+                continue
+
+            # Project payments for the next years
+            for year_offset in range(2):  # Check current and next year
+                year = cal_today.year + year_offset
+                for month in payment_months:
+                    try:
+                        payment_date = datetime(year, month, 1)
+                    except ValueError:
+                        continue 
+
+                    if payment_date >= cal_today and payment_date < time_limit:
+                        month_year_str = f"{month_name[month]} {year}"
+                        if month_year_str not in dividend_calendar:
+                            dividend_calendar[month_year_str] = []
+                        if ticker not in dividend_calendar[month_year_str]:
+                            dividend_calendar[month_year_str].append(ticker)
+    return dividend_calendar
+
+def check_portfolio_history_consistency(month_ends: list[pd.Timestamp], monthly_metrics: dict, cached_history: list[dict]) -> list[dict]:
+    """
+    Checks if the cached historical portfolio metrics are consistent with the newly calculated monthly metrics.
+    If consistent, returns the cached history up to the last month. If not, returns an empty list to recalculate from scratch.
+    Consistency is checked by comparing the total dividends and total deposits for the last cached month with
+    the corresponding values in the newly calculated monthly metrics. If there is a significant difference (greater than 0.01), it is considered inconsistent.
+    """
+    history = []
+    current_me_str = month_ends[-1].strftime('%m/%y')
+        
+    # Check for consistency: if last cached month's total dividends match fresh calculation
+    last_cached_entry = cached_history[-1] if cached_history[-1]['date'] != current_me_str else (cached_history[-2] if len(cached_history) > 1 else None)
+    
+    is_consistent = True
+    if last_cached_entry:
+        last_date_str = last_cached_entry['date']
+        fresh_total_div = monthly_metrics['cumulative_dividends'].get(last_date_str, 0)
+        fresh_total_dep = monthly_metrics['cumulative_deposits'].get(last_date_str, 0)
+        
+        # Use a small epsilon for float comparison
+        div_diff = abs(last_cached_entry['total_dividends'] - fresh_total_div)
+        dep_diff = abs(last_cached_entry['total_deposit'] - fresh_total_dep)
+        
+        if div_diff > 0.01 or dep_diff > 0.01:
+            reason = "dividends" if div_diff > 0.01 else "deposits"
+            print(f"      Historical data change detected in {reason} for {last_date_str}. Recalculating full history.")
+            is_consistent = False
+    
+    if is_consistent:
+        for entry in cached_history:
+            if entry['date'] != current_me_str:
+                history.append(entry)
+            else:
+                break
+        if history:
+            print(f"      Resuming portfolio history from {history[-1]['date']}. Skipped {len(history)} months.")
+        else:
+            print("     Resuming portfolio history from the beginning. No cached months added.")
+    else:
+        print("      Inconsistent historical data. Starting portfolio history from scratch.")
+    return history

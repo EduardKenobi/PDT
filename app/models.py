@@ -58,8 +58,11 @@ class TickerData:
     country: str
     dividend_yield: float
     yield_on_cost: float
+    has_paying_dividend: bool
     average_dividend_yield_5y: float
+    has_div_yield_above_5y_avg: bool
     dividend_growth: DividendGrowthMetrics
+    has_div_growth_above_inflation: bool
     open_positions: List[PositionData]
     closed_positions: List[ClosedPositionData]
     ratio_on_cost: float = 0.0
@@ -67,6 +70,7 @@ class TickerData:
     ratio_on_market_value: float = 0.0
     name: Optional[str] = None
     sector: Optional[str] = None
+    tier_group: Optional[str] = None
     next_dividend_month: Optional[str] = None
     dividend_payment_months: Optional[List[int]] = None
     div_frequency: Optional[str] = None

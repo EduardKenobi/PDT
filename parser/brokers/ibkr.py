@@ -158,11 +158,31 @@ def _parse_dividends_and_withholding(csv_content: str, instrument_info_map: dict
     csv_file = StringIO(csv_content)
     rows = list(csv.reader(csv_file))
     
+    # Map section headers to find column indices (especially 'Code')
+    section_headers = {}
+    for row in rows:
+        if len(row) > 1 and row[1].strip() == 'Header':
+            section_headers[row[0].strip()] = [col.strip() for col in row]
+
     for i, row in enumerate(rows):
         if len(row) > 5 and row[1].strip() == 'Data':
             section = row[0].strip()
             if section in ['Dividends', 'Withholding Tax']:
                 currency, date_str, description, amount_str = row[2].strip(), row[3].strip(), row[4].strip(), row[5].strip()
+                
+                if currency == 'Total':
+                    continue
+                
+                # Check for accrual codes if 'Code' column exists
+                headers = section_headers.get(section, [])
+                if 'Code' in headers:
+                    code_idx = headers.index('Code')
+                    if code_idx < len(row):
+                        code = row[code_idx].strip()
+                        # 'Po' = Posting, 'Re' = Reversal (accrual related)
+                        if 'Po' in code or 'Re' in code:
+                            continue
+
                 try:
                     amount = float(amount_str)
                     op_type = 'Dividend' if section == 'Dividends' else 'Withholding Tax'
@@ -195,6 +215,19 @@ def _parse_dividends_and_withholding(csv_content: str, instrument_info_map: dict
                             for j in range(i + 1, min(i + 15, len(rows))):
                                 next_row = rows[j]
                                 if len(next_row) > 5 and next_row[0].strip() == 'Withholding Tax' and next_row[1].strip() == 'Data':
+                                    # Ensure next_row is not an accrual or total
+                                    next_currency = next_row[2].strip()
+                                    if next_currency == 'Total':
+                                        continue
+                                        
+                                    next_headers = section_headers.get('Withholding Tax', [])
+                                    if 'Code' in next_headers:
+                                        next_code_idx = next_headers.index('Code')
+                                        if next_code_idx < len(next_row):
+                                            next_code = next_row[next_code_idx].strip()
+                                            if 'Po' in next_code or 'Re' in next_code:
+                                                continue
+
                                     next_desc = next_row[4].strip()
                                     if raw_ticker in next_desc and next_row[3].strip() == date_str:
                                         try:
