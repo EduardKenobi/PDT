@@ -12,7 +12,7 @@ from config import MARKET_DATA_OUTPUT, PRIMARY_CURRENCY, OPEN_TICKERS_FILE, TICK
 from utils.exchange_rate import get_all_currency_exchange_rate_caches
 from utils.data_fetcher import get_batch_history_data, get_ticker_info_batch
 from utils.data_loader import load_all_data
-from app.stock.stock_metrics import calculate_average_dividend_yield, calculate_dividend_growth
+from app.stock.stock_metrics import calculate_average_dividend_yield
 from utils.json_utils import clean_for_json, default_serialize
 
 def process_batch_metrics(symbol: str, ticker_df: pd.DataFrame, freq: str = "Quarterly") -> dict:
@@ -35,9 +35,8 @@ def process_batch_metrics(symbol: str, ticker_df: pd.DataFrame, freq: str = "Qua
     except Exception:
         current_price = None
 
-    # Avg Yield & Growth
+    # Avg Yield
     avg_yield = calculate_average_dividend_yield(symbol, ticker_df)
-    growth = calculate_dividend_growth(ticker_df, freq)
     
     # Dividend History (from 'Dividends' column where > 0)
     dividends = []
@@ -70,7 +69,6 @@ def process_batch_metrics(symbol: str, ticker_df: pd.DataFrame, freq: str = "Qua
     return {
         "price": current_price,
         "avg_yield_5y": avg_yield,
-        "growth": growth,
         "dividends": dividends,
         "dividend_dates": div_dates,  # Keep for backward compatibility
         "monthly_prices": monthly_prices,
@@ -85,7 +83,7 @@ def is_dynamic_cache_complete(symbol: str, cache: dict) -> bool:
         return False
     dyn = cache["tickers"][symbol]["dynamic"]
     # Ensure all core fields exist (even if they are empty, but the keys must be there)
-    required_fields = ["avg_yield_5y", "growth", "dividends", "dividend_dates", "monthly_prices"]
+    required_fields = ["avg_yield_5y", "dividends", "dividend_dates", "monthly_prices"]
     return all(field in dyn for field in required_fields)
 
 def main():

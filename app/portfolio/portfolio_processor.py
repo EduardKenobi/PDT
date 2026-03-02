@@ -1,6 +1,5 @@
 import pandas as pd
 from datetime import datetime
-from calendar import month_name
 from typing import Dict, List, Optional
 
 from app.models import TickerData, PortfolioSummary
@@ -9,7 +8,8 @@ from app.portfolio.portfolio_metrics import (
     calculate_free_cash_by_currency, get_ibkr_free_cash, 
     get_cash_operations_summary, get_other_cash_operations_summary, 
     get_portfolio_dividends_per_year, get_portfolio_dividends_ltm,
-    get_portfolio_dividends_per_quarter
+    get_portfolio_dividends_per_quarter, get_portfolio_dividend_calendar,
+    check_portfolio_history_consistency
 )
 from utils.exchange_rate import normalize_currency, get_rate_from_cache
 from app.stock.stock_metrics import predict_dividend_income_calendar
@@ -80,7 +80,7 @@ def calculate_portfolio_summary(all_tickers_data: Dict[str, TickerData], transac
     div_growth_cost_weighted, div_growth_padi_weighted = 0, 0
     cost_sum, padi_sum = 0, 0
     for data in all_tickers_data.values():
-        if data.current_shares > 0 and data.dividend_growth.ttm and data.dividend_growth.ttm[1] is not None:
+        if data.has_open_position and data.dividend_growth.ttm and data.dividend_growth.ttm[1] is not None:
             cost, p = data.cost_basis_primary_currency, data.padi
             if cost > 0:
                 div_growth_cost_weighted += data.dividend_growth.ttm[1] * cost
@@ -91,34 +91,8 @@ def calculate_portfolio_summary(all_tickers_data: Dict[str, TickerData], transac
     
     projected_dividend_income = predict_dividend_income_calendar(all_tickers_data, dividends_data, exchange_rate_cache)
 
-    # Pre-calculate Dividend Calendar for Reporter
-    dividend_calendar = {}
-    timeframe_months = 12
-    # Reset to the beginning of the current day/month (00:00:00) so we capture everything from today onwards
-    cal_today = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    time_limit = cal_today + pd.DateOffset(months=timeframe_months)
-
-    for ticker, data in all_tickers_data.items():
-        if data.current_shares > 0:
-            payment_months = data.dividend_payment_months
-            if not payment_months:
-                continue
-
-            # Project payments for the next years
-            for year_offset in range(2):  # Check current and next year
-                year = cal_today.year + year_offset
-                for month in payment_months:
-                    try:
-                        payment_date = datetime(year, month, 1)
-                    except ValueError:
-                        continue 
-
-                    if payment_date >= cal_today and payment_date < time_limit:
-                        month_year_str = f"{month_name[month]} {year}"
-                        if month_year_str not in dividend_calendar:
-                            dividend_calendar[month_year_str] = []
-                        if ticker not in dividend_calendar[month_year_str]:
-                            dividend_calendar[month_year_str].append(ticker)
+    # Calculate dividend calendar for next 12 months
+    dividend_calendar = get_portfolio_dividend_calendar(all_tickers_data, today)
 
     # Pre-calculate Quarterly Dividends for Reporter
     q_divs_raw = get_portfolio_dividends_per_quarter(div_df, exchange_rate_cache)
@@ -178,16 +152,11 @@ def calculate_portfolio_history(transactions_df: pd.DataFrame, dividends_data: d
     ibkr_trades = transactions_df[transactions_df['broker'] == 'ibkr']
     first_ibkr_date = ibkr_trades['open_date_dt'].min() if not ibkr_trades.empty else None
 
-    # Incremental update logic: Keep all but the running month from cache
+    # 0. Incremental Update Logic: If cached history exists, check for consistency and resume from last month if possible
     if cached_history:
-        current_me_str = month_ends[-1].strftime('%m/%y')
-        for entry in cached_history:
-            if entry['date'] != current_me_str:
-                history.append(entry)
-            else:
-                break
-        if history:
-            print(f"      Resuming portfolio history from {history[-1]['date']}. Skipped {len(history)} months.")
+        # If consistent, history will contain all cached months except the last one (which is the running month).
+        # If not consistent, history will be empty and we will recalculate from scratch.
+        history = check_portfolio_history_consistency(month_ends, monthly_metrics, cached_history)
 
     # 1. Aggregating Invested, Market Value and PADI from tickers (fast aggregation)
     ticker_histories_by_date = _aggregate_ticker_data_by_date(all_tickers_data)

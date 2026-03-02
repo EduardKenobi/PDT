@@ -15,8 +15,6 @@ from app.portfolio.portfolio_processor import (
     calculate_portfolio_history
 )
 from app.history.history_helpers import (
-    _prepare_dividend_history_df,
-    _get_month_ends,
     _prepare_monthly_portfolio_metrics
 )
 

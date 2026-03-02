@@ -76,10 +76,10 @@ def sum_realized_gains_per_currency(positions_df: pd.DataFrame) -> dict:
     # Convert the result to a dictionary
     return gains_per_currency.to_dict()
 
-def calculate_padi_value(shares: float, amount_per_share: Optional[float], frequency: int) -> float:
+def calculate_padi_value(shares: float, amount_per_share: Optional[float]) -> float:
     """Calculates the Projected Annual Dividend Income for a holding."""
-    if shares > 0 and amount_per_share and frequency > 0:
-        return shares * amount_per_share * frequency
+    if shares > 0 and amount_per_share > 0:
+        return shares * amount_per_share
     return 0.0
 
 def calculate_forward_dividend(ticker: str, frequency_type: str, dividends_history: list, currency: str = '') -> float:
@@ -168,4 +168,8 @@ def calculate_forward_dividend(ticker: str, frequency_type: str, dividends_histo
     except (KeyError, IndexError, TypeError) as e:
         logging.error(f"{ticker}: Error calculating forward dividend: {e}")
         return 0.0
+    
+def above_safety_margin(value: float, target: float, margin: float) -> bool:
+    """Checks if a value is above a target considering a safety margin."""
+    return value > (target * (1 - margin))
 

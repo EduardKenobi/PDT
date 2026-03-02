@@ -3,12 +3,12 @@ from datetime import datetime
 from typing import Optional, Dict, List, Tuple
 
 from app.models import TickerData, DividendGrowthMetrics, PositionData, ClosedPositionData
-from config import PRIMARY_CURRENCY, DIVIDEND_FREQ_MAP
-from utils.stock_calculator import sum_shares, calculate_cost_per_currency, calculate_padi_value, calculate_forward_dividend
+from config import PRIMARY_CURRENCY, DIVIDEND_FREQ_MAP, ANALYSIS_MAP, SAFETY_MARGIN, MIN_5Y_DIVIDEND_GROWTH, TIER1, TIER2, TIER3, TIERG
+from utils.stock_calculator import sum_shares, calculate_cost_per_currency, calculate_padi_value, calculate_forward_dividend, above_safety_margin
 from utils.analytics import calculate_cagr, calculate_yoy, normalize_price, convert_currency
 from app.stock.stock_metrics import (
     calculate_total_dividends, predict_next_dividend_month, 
-    get_dividend_payment_months, get_historical_dividend_dates
+    get_dividend_payment_months, get_historical_dividend_dates, calculate_dividend_growth
 )
 from utils.exchange_rate import normalize_currency, get_rate_from_cache
 from app.history.history_helpers import _prepare_dividend_history_df, _get_month_ends, _get_history_metrics_at_date
@@ -144,6 +144,32 @@ def calculate_ticker_history(ticker: str, transactions_df: pd.DataFrame, div_df:
     
     return history
 
+def _set_tier_group_for_ticker(ticker: str, tier_group: str) -> str:
+    """Sets the tier group for a ticker in the existing tickers data, if not already set."""
+
+    # Prompt user for Tier Group if not already set
+    if tier_group is None:
+        tier_map = {
+            '1': TIER1,
+            '2': TIER2,
+            '3': TIER3,
+            '4': TIERG
+        }
+        while True:
+            print(f"Ticker: {ticker}")
+            print(f"\nPlease select a Tier Group for {ticker} (Open Positions):")
+            print(f"  (1) {TIER1}")
+            print(f"  (2) {TIER2}")
+            print(f"  (3) {TIER3}")
+            print(f"  (4) {TIERG}")
+            choice = input("Enter your choice (1-4): ")
+            if choice in tier_map:
+                tier_group = tier_map[choice]
+                break
+            else:
+                print("Invalid choice. Please try again.")
+    return tier_group
+
 def calculate_ticker_metrics(ticker, transactions_df, dividends_data, ticker_map_data, market_data, div_df: pd.DataFrame, cached_ticker_data: Dict = None, month_ends: pd.DatetimeIndex = None) -> Optional[TickerData]:
     """
     Calculate all metrics using 100% cached data where possible.
@@ -167,6 +193,11 @@ def calculate_ticker_metrics(ticker, transactions_df, dividends_data, ticker_map
     price_currency = normalize_currency(price_currency)
     
     current_shares = sum_shares(open_positions)
+    # Determine if ticker has open positions
+    has_open_position = current_shares > 0
+
+    # Get tier_group from cache
+    tier_group = cached_ticker_data.get('tier_group')
     
     # Optimize closed positions processing: if number of closed matches cache, reuse details
     cached_closed_details = cached_ticker_data.get('closed_positions', []) if cached_ticker_data else []
@@ -180,68 +211,82 @@ def calculate_ticker_metrics(ticker, transactions_df, dividends_data, ticker_map
     
     total_dividends_received_ticker, total_tax_paid_ticker = calculate_total_dividends(ticker, dividends_data, exchange_rate_cache, PRIMARY_CURRENCY)
 
-    # Dynamic metrics from cache
-    current_price = normalize_price(dynamic_data.get('price'), ticker)
-    
-    # Calculate forward dividend from historical data
-    div_frequency_str = ticker_map_data.get('ticker_info', {}).get(ticker, {}).get('div_frequency', 'N/A')
-    api_forward_dividend = static_info.get('forward_dividend', 0.0)
-    dividends_history = dynamic_data.get('dividends', [])
-    
-    # Use our custom calculation based on frequency type
-    forward_dividend = calculate_forward_dividend(
-        ticker=ticker,
-        frequency_type=div_frequency_str,
-        dividends_history=dividends_history,
-        currency=price_currency
-    )
+    # Initialize open positions details and gain metrics; will be calculated if there are open positions
+    open_positions_details, gain_amount, total_cost_primary, market_value_primary, cost_by_currency, gain_perc = ([], 0, 0, 0, {}, 0)
+    dividend_dates, dividend_payment_months, next_dividend_month, div_frequency_str = ([], [], "N/A", "N/A")
+    padi, div_yield, forward_dividend, current_price, yield_on_cost, avg_div_yield, div_growth_metrics = (0, 0, 0, 0, 0, 0, DividendGrowthMetrics())
+    dividend_payment_months, next_dividend_month = ([], "N/A")
+    has_div_yield_above_5y_avg = False
 
-    open_positions_details, gain_amount, total_cost_primary, market_value_primary, cost_by_currency = ([], 0, 0, 0, {})
-    if current_shares > 0:
+    # Process attributes necessary for tickers with open positions
+    if has_open_position:
+        # Dynamic metrics from cache
+        current_price = normalize_price(dynamic_data.get('price'), ticker)
+    
+        # Calculate forward dividend from historical data
+        div_frequency_str = ticker_map_data.get('ticker_info', {}).get(ticker, {}).get('div_frequency', 'N/A')
+        dividends_history = dynamic_data.get('dividends', [])
+    
+        # Use our custom calculation based on frequency type
+        forward_dividend = calculate_forward_dividend(
+            ticker=ticker,
+            frequency_type=div_frequency_str,
+            dividends_history=dividends_history,
+            currency=price_currency
+        )
+
+        # Process open positions with caching where possible
         open_positions_details, gain_amount, total_cost_primary, market_value_primary, cost_by_currency = \
             process_open_positions(open_positions, current_price, price_currency, exchange_rate_cache)
+        gain_perc = (gain_amount / total_cost_primary)
 
-    gain_perc = (gain_amount / total_cost_primary) if total_cost_primary > 0 else 0
-    ticker_realized_gain_perc = (ticker_realized_gain / ticker_cost_of_closed) if ticker_cost_of_closed > 0 else 0
-    total_cost_of_all_positions = total_cost_primary + ticker_cost_of_closed
-    total_profit_loss = ticker_realized_gain + gain_amount + total_dividends_received_ticker - total_tax_paid_ticker
-    total_pl_perc = (total_profit_loss / total_cost_of_all_positions) if total_cost_of_all_positions > 0 else 0
+        div_yield = (forward_dividend / current_price) if current_price and current_price > 0 else 0
 
-    div_yield = (forward_dividend / current_price) if current_price and current_price > 0 else 0
-    
-    # Use cached metrics
-    avg_div_yield = dynamic_data.get('avg_yield_5y', 0.0)
-    div_growth_dict = dynamic_data.get('growth', {})
-    div_growth_metrics = DividendGrowthMetrics(
-        ttm=div_growth_dict.get('ttm'),
-        cagr_3y=div_growth_dict.get('3y'),
-        cagr_5y=div_growth_dict.get('5y'),
-        cagr_10y=div_growth_dict.get('10y')
-    )
+        # Use cached metrics
+        avg_div_yield = dynamic_data.get('avg_yield_5y', 0.0)
+        
+        tier_group = _set_tier_group_for_ticker(ticker, tier_group)
+                    
+        # Calculate dividend growth metrics
+        calculated_growth_metrics = calculate_dividend_growth(
+            dividends_history,
+            div_frequency_str,
+            price_currency,
+            forward_dividend
+        )
+        div_growth_metrics = DividendGrowthMetrics(
+            ttm=calculated_growth_metrics.get('ttm'),
+            cagr_3y=calculated_growth_metrics.get('3y'),
+            cagr_5y=calculated_growth_metrics.get('5y'),
+            cagr_10y=calculated_growth_metrics.get('10y')
+        )
 
-    padi = calculate_padi_value(current_shares, forward_dividend, 1) # forward_dividend is already annualized
-    padi = convert_currency(padi, price_currency, PRIMARY_CURRENCY, datetime.now().strftime('%Y-%m-%d'), exchange_rate_cache, get_rate_from_cache)
-    yield_on_cost = (padi / total_cost_primary) if total_cost_primary > 0 else 0
-    
-    # Initialize dividend pattern fields
-    dividend_dates = []
-    dividend_payment_months = []
-    next_dividend_month = "N/A"
-    
-    # Only calculate patterns for open positions
-    if current_shares > 0:
+        has_div_yield_above_5y_avg = above_safety_margin(div_yield, avg_div_yield, margin=SAFETY_MARGIN) if avg_div_yield > 0 else False
+
+        padi = calculate_padi_value(current_shares, forward_dividend) # forward_dividend is already annualized
+        padi = convert_currency(padi, price_currency, PRIMARY_CURRENCY, datetime.now().strftime('%Y-%m-%d'), exchange_rate_cache, get_rate_from_cache)
+        yield_on_cost = (padi / total_cost_primary) if total_cost_primary > 0 else 0
+
         cached_history_dates = dynamic_data.get('dividend_dates', [])
         # Fetch dividend dates once
         dividend_dates = get_historical_dividend_dates(ticker, dividends_data, cached_history_dates)
         dividend_payment_months = get_dividend_payment_months(dividend_dates)
         next_dividend_month = predict_next_dividend_month(ticker, dividends_data, div_frequency_str, dividend_dates, payment_months=dividend_payment_months)
 
+    has_paying_dividend, has_div_growth_above_inflation = (False, False)
+    if forward_dividend:
+        has_paying_dividend = True
+        if div_growth_metrics.cagr_5y is not None:
+            has_div_growth_above_inflation = div_growth_metrics.cagr_5y > MIN_5Y_DIVIDEND_GROWTH
+
+    ticker_realized_gain_perc = (ticker_realized_gain / ticker_cost_of_closed) if ticker_cost_of_closed > 0 else 0
+    total_cost_of_all_positions = total_cost_primary + ticker_cost_of_closed
+    total_profit_loss = ticker_realized_gain + gain_amount + total_dividends_received_ticker - total_tax_paid_ticker
+    total_pl_perc = (total_profit_loss / total_cost_of_all_positions) if total_cost_of_all_positions > 0 else 0
+    
     # Calculate ticker history
     cached_history = cached_ticker_data.get('history', []) if cached_ticker_data else []
     ticker_history = calculate_ticker_history(ticker, transactions_df, div_df, market_data, ticker_map_data, exchange_rate_cache, cached_history, month_ends)
-
-    # Determine if ticker has open positions
-    has_open_position = current_shares > 0
 
     return TickerData(
         ticker=ticker, current_shares=current_shares, has_open_position=has_open_position, market_value_primary=market_value_primary,
@@ -255,8 +300,8 @@ def calculate_ticker_metrics(ticker, transactions_df, dividends_data, ticker_map
         total_profit_loss_percentage=total_pl_perc,
         padi=padi, forward_dividend=forward_dividend, current_price=current_price, 
         price_currency=price_currency, country=country, dividend_yield=div_yield, 
-        yield_on_cost=yield_on_cost, average_dividend_yield_5y=avg_div_yield,
-        dividend_growth=div_growth_metrics,
+        yield_on_cost=yield_on_cost, has_paying_dividend=has_paying_dividend, average_dividend_yield_5y=avg_div_yield, has_div_yield_above_5y_avg=has_div_yield_above_5y_avg,
+        dividend_growth=div_growth_metrics, has_div_growth_above_inflation=has_div_growth_above_inflation,
         open_positions=open_positions_details,
         closed_positions=closed_positions_details,
         next_dividend_month=next_dividend_month,
@@ -264,6 +309,7 @@ def calculate_ticker_metrics(ticker, transactions_df, dividends_data, ticker_map
         div_frequency=div_frequency_str,
         name=static_info.get('name'),
         sector=static_info.get('sector'),
+        tier_group=tier_group,
         history=ticker_history
     )
 

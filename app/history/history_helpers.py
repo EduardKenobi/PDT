@@ -78,7 +78,6 @@ def _get_history_metrics_at_date(date: pd.Timestamp, ref_str: str, transactions_
 
         # Calculate forward dividend from historical data
         div_frequency_str = ticker_map_data.get('ticker_info', {}).get(ticker, {}).get('div_frequency', 'N/A')
-        api_forward_dividend = static_info.get('forward_dividend', 0.0)
         dividends_history = dynamic_data.get('dividends', [])
         
         forward_dividend = calculate_forward_dividend(
@@ -89,7 +88,7 @@ def _get_history_metrics_at_date(date: pd.Timestamp, ref_str: str, transactions_
         )
         
         if is_recent_me and forward_dividend > 0:
-            padi_ticker = calculate_padi_value(shares, forward_dividend, 1)
+            padi_ticker = calculate_padi_value(shares, forward_dividend)
             padi_at_date += convert_currency(padi_ticker, price_currency, PRIMARY_CURRENCY, ref_str, exchange_rate_cache, get_rate_from_cache)
         else:
             # For historical dates, we need to calculate forward dividend based on dividends known at that time
@@ -111,7 +110,7 @@ def _get_history_metrics_at_date(date: pd.Timestamp, ref_str: str, transactions_
                     )
                     
                     if forward_dividend_hist > 0:
-                        padi_hist = calculate_padi_value(shares, forward_dividend_hist, 1) # annualized
+                        padi_hist = calculate_padi_value(shares, forward_dividend_hist) # annualized
                         padi_at_date += convert_currency(padi_hist, price_currency, PRIMARY_CURRENCY, ref_str, exchange_rate_cache, get_rate_from_cache)
 
                 except Exception as e:
