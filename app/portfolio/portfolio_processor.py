@@ -14,12 +14,12 @@ from app.portfolio.portfolio_metrics import (
 from utils.exchange_rate import normalize_currency, get_rate_from_cache
 from app.stock.stock_metrics import predict_dividend_income_calendar
 from app.history.history_helpers import (
-    _prepare_dividend_history_df, _get_month_ends, 
+    _get_month_ends, 
     _prepare_monthly_portfolio_metrics, _aggregate_ticker_data_by_date, 
     _create_history_entry
 )
 
-def calculate_portfolio_summary(all_tickers_data: Dict[str, TickerData], transactions_df, dividends_data, cash_operations_data, exchange_rate_cache, div_df: pd.DataFrame = None) -> PortfolioSummary:
+def calculate_portfolio_summary(all_tickers_data: Dict[str, TickerData], transactions_df: pd.DataFrame, dividends_df: pd.DataFrame, cash_operations_data: dict, exchange_rate_cache: dict, div_df: pd.DataFrame = None, other_ops_df: pd.DataFrame = None) -> PortfolioSummary:
     """
     Calculate overall portfolio summary metrics using cached exchange rates.
     """
@@ -73,10 +73,15 @@ def calculate_portfolio_summary(all_tickers_data: Dict[str, TickerData], transac
     realized_pl_percentage = realized_pl / cost_of_closed_positions if cost_of_closed_positions > 0 else 0
 
     if div_df is None:
-        div_df = _prepare_dividend_history_df(dividends_data)
+        div_df = dividends_df
 
     portfolio_dividends_per_year = get_portfolio_dividends_per_year(div_df, exchange_rate_cache)
     
+    # Debug
+    # for ticker, data in all_tickers_data.items():
+    #     if data.has_open_position and data.dividend_growth.ttm and data.dividend_growth.ttm[1] is not None:
+    #         print(f"Ticker: {ticker}, TTM Growth: {data.dividend_growth.ttm[1]:.2%}, Cost: {data.cost_basis_primary_currency:.2f}, PADI: {data.padi:.2f}")
+
     div_growth_cost_weighted, div_growth_padi_weighted = 0, 0
     cost_sum, padi_sum = 0, 0
     for data in all_tickers_data.values():
@@ -88,8 +93,20 @@ def calculate_portfolio_summary(all_tickers_data: Dict[str, TickerData], transac
             if p > 0:
                 div_growth_padi_weighted += data.dividend_growth.ttm[1] * p
                 padi_sum += p
+
+    div_growth_cost_weighted_5yr, div_growth_padi_weighted_5yr = 0, 0
+    cost_sum_5yr, padi_sum_5yr = 0, 0
+    for data in all_tickers_data.values():
+        if data.has_open_position and data.dividend_growth.cagr_5y is not None:
+            cost, p = data.cost_basis_primary_currency, data.padi
+            if cost > 0:
+                div_growth_cost_weighted_5yr += data.dividend_growth.cagr_5y * cost
+                cost_sum_5yr += cost
+            if p > 0:
+                div_growth_padi_weighted_5yr += data.dividend_growth.cagr_5y * p
+                padi_sum_5yr += p
     
-    projected_dividend_income = predict_dividend_income_calendar(all_tickers_data, dividends_data, exchange_rate_cache)
+    projected_dividend_income = predict_dividend_income_calendar(all_tickers_data, dividends_df, exchange_rate_cache)
 
     # Calculate dividend calendar for next 12 months
     dividend_calendar = get_portfolio_dividend_calendar(all_tickers_data, today)
@@ -119,6 +136,8 @@ def calculate_portfolio_summary(all_tickers_data: Dict[str, TickerData], transac
         dividends_ltm=get_portfolio_dividends_ltm(div_df, exchange_rate_cache),
         portfolio_dividend_growth_ttm_cost_weighted=div_growth_cost_weighted / cost_sum if cost_sum > 0 else 0,
         portfolio_dividend_growth_ttm_padi_weighted=div_growth_padi_weighted / padi_sum if padi_sum > 0 else 0,
+        portfolio_dividend_growth_5y_cost_weighted=div_growth_cost_weighted_5yr / cost_sum_5yr if cost_sum_5yr > 0 else 0,
+        portfolio_dividend_growth_5y_padi_weighted=div_growth_padi_weighted_5yr / padi_sum_5yr if padi_sum_5yr > 0 else 0,
         primary_currency=PRIMARY_CURRENCY,
         investment_start_date=investment_start_date.strftime('%Y-%m-%d') if investment_start_date else None,
         years_invested=years_invested,
@@ -131,7 +150,7 @@ def calculate_portfolio_summary(all_tickers_data: Dict[str, TickerData], transac
         quarterly_dividends=quarterly_dividends
     )
 
-def calculate_portfolio_history(transactions_df: pd.DataFrame, dividends_data: dict, cash_operations_data: dict, market_data: dict, ticker_map_data: dict, all_tickers_data: Dict[str, TickerData], cached_history: List[Dict] = None, div_df: pd.DataFrame = None, month_ends: pd.DatetimeIndex = None, monthly_metrics: Dict = None) -> List[Dict]:
+def calculate_portfolio_history(transactions_df: pd.DataFrame, dividends_df: pd.DataFrame, cash_operations_data: dict, market_data: dict, ticker_map_data: dict, all_tickers_data: Dict[str, TickerData], cached_history: List[Dict] = None, div_df: pd.DataFrame = None, month_ends: pd.DatetimeIndex = None, monthly_metrics: Dict = None, other_ops_df: pd.DataFrame = None) -> List[Dict]:
     """
     Calculates the portfolio state at the end of each month.
     Aggregates per-ticker histories and adds portfolio-level metrics (cash, deposits).
@@ -144,9 +163,10 @@ def calculate_portfolio_history(transactions_df: pd.DataFrame, dividends_data: d
     exchange_rate_cache = market_data.get('exchange_rate_cache', {})
     ibkr_cash_primary = get_ibkr_free_cash().get(PRIMARY_CURRENCY, 0)
     
-    other_ops = pd.DataFrame(cash_operations_data.get('other_operations', []))
-    if not other_ops.empty:
-        other_ops['date_dt'] = pd.to_datetime(other_ops['date'])
+    if other_ops_df is None:
+        other_ops_df = pd.DataFrame(cash_operations_data.get('other_operations', []))
+        if not other_ops_df.empty:
+            other_ops_df['date_dt'] = pd.to_datetime(other_ops_df['date'])
     
     transactions_df = transactions_df.copy()
     ibkr_trades = transactions_df[transactions_df['broker'] == 'ibkr']
@@ -165,7 +185,7 @@ def calculate_portfolio_history(transactions_df: pd.DataFrame, dividends_data: d
     if not monthly_metrics:
         # Fallback to internal calculation if not provided (keeping backward compatibility)
         monthly_metrics = _prepare_monthly_portfolio_metrics(
-            month_ends, div_df, other_ops, exchange_rate_cache, ibkr_cash_primary, first_ibkr_date
+            month_ends, div_df, other_ops_df, exchange_rate_cache, ibkr_cash_primary, first_ibkr_date
         )
 
     # 3. Final Loop - Now O(N) due to pre-calculations

@@ -32,17 +32,17 @@ def get_data_for_analyzer():
     """
     Prepare and filter data for analysis.
     """
-    transactions_df, dividends_data, ticker_map_data, cash_operations_data, all_tickers, month_ends, div_df = load_all_data()
+    transactions_df, dividends_data, ticker_map_data, cash_ops_raw, all_tickers, month_ends, div_df, other_ops_df = load_all_data()
     if transactions_df is None:
         print("Could not load data. Exiting.")
         return
-
+    
     market_data = load_market_data()
     if not market_data:
         print("Error: Market data cache is empty. Please run Updater first.")
         return
     
-    return transactions_df, dividends_data, ticker_map_data, cash_operations_data, all_tickers, month_ends, div_df, market_data
+    return transactions_df, dividends_data, ticker_map_data, cash_ops_raw, all_tickers, month_ends, div_df, market_data, other_ops_df
 
 def get_stock_analysis_output_data_by_attribute(attribute):
     """
@@ -67,7 +67,10 @@ def main():
     # 1. Load Data
     print("\n[1/7] Loading data and market data...")
     start_time = time.time()
-    transactions_df, dividends_data, ticker_map_data, cash_operations_data, all_tickers, month_ends, div_df, market_data = get_data_for_analyzer()
+    result = get_data_for_analyzer()
+    if not result:
+        return
+    transactions_df, dividends_data, ticker_map_data, cash_operations_data, all_tickers, month_ends, div_df, market_data, other_ops = result
     print(f"      Finished in {time.time() - start_time:.2f}s")
 
     # 2. Prepare Monthly Portfolio Metrics (Cash, Deposits, Dividends)
@@ -79,9 +82,7 @@ def main():
     # Let's align with analyzer_engine's logic.
     ibkr_cash_primary_val = get_ibkr_free_cash().get(PRIMARY_CURRENCY, 0)
     
-    other_ops = pd.DataFrame(cash_operations_data.get('other_operations', []))
-    if not other_ops.empty:
-        other_ops['date_dt'] = pd.to_datetime(other_ops['date'])
+    ibkr_cash_primary_val = get_ibkr_free_cash().get(PRIMARY_CURRENCY, 0)
     
     # Need first_ibkr_date
     ibkr_trades = transactions_df[transactions_df['broker'] == 'ibkr']
@@ -94,13 +95,13 @@ def main():
     print(f"\n[3/7] Processing {len(all_tickers)} tickers (Incremental)...")
     start_time = time.time()
     existing_tickers_data = get_stock_analysis_output_data_by_attribute('tickers')
-    all_tickers_data = process_all_tickers(transactions_df, dividends_data, ticker_map_data, all_tickers, market_data, existing_tickers_data, div_df, month_ends)
+    all_tickers_data = process_all_tickers(transactions_df, div_df, ticker_map_data, all_tickers, market_data, existing_tickers_data, div_df, month_ends)
     print(f"      Finished in {time.time() - start_time:.2f}s")
 
     # 4. Portfolio Summary
     print("\n[4/7] Calculating portfolio summary...")
     start_time = time.time()
-    portfolio_summary = calculate_portfolio_summary(all_tickers_data, transactions_df, dividends_data, cash_operations_data, market_data.get('exchange_rate_cache', {}), div_df)
+    portfolio_summary = calculate_portfolio_summary(all_tickers_data, transactions_df, div_df, cash_operations_data, market_data.get('exchange_rate_cache', {}), div_df, other_ops)
     print(f"      Finished in {time.time() - start_time:.2f}s")
 
     # 5. Enrich Tickers
@@ -113,7 +114,7 @@ def main():
     print("\n[6/7] Generating portfolio history...")
     start_time = time.time()
     existing_history = get_stock_analysis_output_data_by_attribute('portfolio_history')
-    portfolio_history = calculate_portfolio_history(transactions_df, dividends_data, cash_operations_data, market_data, ticker_map_data, all_tickers_data, existing_history, div_df, month_ends, monthly_metrics)
+    portfolio_history = calculate_portfolio_history(transactions_df, div_df, cash_operations_data, market_data, ticker_map_data, all_tickers_data, existing_history, div_df, month_ends, monthly_metrics, other_ops)
     print(f"      Finished in {time.time() - start_time:.2f}s")
 
     # 7. Save Results

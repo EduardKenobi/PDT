@@ -307,37 +307,154 @@ def get_transactions_from_csv_files(file_paths: list[str]) -> dict:
     save_ticker_cache(ticker_cache)
     return {'companies': merged_companies_data}
 
+def _get_account_info(csv_content: str) -> dict:
+    """
+    Parses the 'Account Information' section to get base currency and other details.
+    """
+    info = {}
+    csv_file = StringIO(csv_content)
+    reader = csv.reader(csv_file)
+    header_found = False
+    headers = []
+    for row in reader:
+        if len(row) > 1 and row[0].strip() == 'Account Information' and row[1].strip() == 'Header':
+            header_found = True
+            headers = [c.strip() for c in row]
+            continue
+        if header_found and len(row) > 1 and row[0].strip() == 'Account Information' and row[1].strip() == 'Data':
+            try:
+                name_idx = headers.index('Field Name')
+                val_idx = headers.index('Field Value')
+                info[row[name_idx].strip()] = row[val_idx].strip()
+            except (ValueError, IndexError):
+                pass
+        if header_found and row[0].strip() != 'Account Information':
+            break
+    return info
+
 def get_ending_cash_balance_from_csv_files(file_paths: list[str]) -> dict:
     """
-    Parses the 'Cash Report' section from IBKR CSV content to extract ending cash balances.
+    Parses IBKR CSV content to extract ending cash balances.
+    Prioritizes total cash values converted to base currency to avoid double-counting.
     """
+    from utils.exchange_rate import normalize_currency
     cash_balances = {}
     for file_path in file_paths:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 csv_content = f.read()
+            
+            # 1. Get base currency
+            account_info = _get_account_info(csv_content)
+            base_currency = normalize_currency(account_info.get('Base Currency', 'EUR'))
+
             csv_file = StringIO(csv_content)
             reader = csv.reader(csv_file)
-            header_found = False
+            
+            file_currency_balances = {}
+            total_cash_from_summary = None
+            current_section = None
+            current_headers = []
 
             for row in reader:
-                if len(row) > 2 and row[0].strip() == 'Cash Report' and row[1].strip() == 'Header':
-                    header_found = True
+                if len(row) < 2:
                     continue
-
-                if header_found and len(row) > 4 and row[0].strip() == 'Cash Report' and row[1].strip() == 'Data':
-                    report_type, currency, amount_str = row[2].strip(), row[3].strip(), row[4].strip()
-                    if report_type == 'Ending Cash':
-                        try:
-                            amount = float(amount_str)
-                            cash_balances[currency] = amount
-                        except ValueError:
-                            print(f"Warning: Could not parse amount '{amount_str}' for ending cash in {currency}. Skipping.")
                 
-                if header_found and row[0].strip() != 'Cash Report':
-                    break # Stop reading after the cash report section
+                section = row[0].strip()
+                record_type = row[1].strip()
+                
+                if record_type == 'Header':
+                    current_section = section
+                    current_headers = [c.strip() for c in row]
+                    continue
+                
+                if record_type == 'Data':
+                    if current_section == 'Net Asset Value':
+                        try:
+                            asset_class_idx = current_headers.index('Asset Class')
+                            total_idx = current_headers.index('Current Total')
+                            asset_class = row[asset_class_idx].strip()
+                            # 'Cash' row in NAV section is the total cash across all currencies in base currency
+                            if asset_class == 'Cash':
+                                total_cash_from_summary = float(row[total_idx].strip())
+                        except (ValueError, IndexError):
+                            pass
+                    
+                    elif current_section == 'Cash Report':
+                        if len(row) > 4:
+                            report_type = row[2].strip()
+                            currency = row[3].strip()
+                            amount_str = row[4].strip()
+                            
+                            if report_type == 'Ending Cash':
+                                try:
+                                    amount = float(amount_str)
+                                    if currency == 'Base Currency Summary':
+                                        if total_cash_from_summary is None:
+                                            total_cash_from_summary = amount
+                                    else:
+                                        file_currency_balances[normalize_currency(currency)] = amount
+                                except ValueError:
+                                    pass
+            
+            # If we found a total cash summary (e.g. from 'Base Currency Summary'), it ALREADY includes
+            # all individual currency balances converted to base currency.
+            # To avoid double-counting in the portfolio processor (which sums all dict keys),
+            # we should ONLY return the total in the base currency key.
+            if total_cash_from_summary is not None:
+                # We overwrite the base currency key with the total and REMOVE others
+                # this ensures that the portfolio value calculation (which sums all currencies)
+                # correctly reflects the total liquidity.
+                file_currency_balances = {base_currency: total_cash_from_summary}
+            
+            # Merge this file's balances into the overall result
+            cash_balances.update(file_currency_balances)
+
         except FileNotFoundError:
             print(f"Error: IBKR CSV file not found at {file_path}")
         except Exception as e:
             print(f"Error parsing IBKR cash balance from {file_path}: {e}")
+            
     return cash_balances
+
+def _parse_open_positions(csv_content: str, instrument_info_map: dict, ticker_cache: dict) -> dict:
+    """
+    Parses the 'Open Positions' section to get current holdings.
+    Returns a dict like {'WKL.AS': {'shares': 4, 'cost_basis': 333.34, 'currency': 'EUR'}}.
+    """
+    positions = {}
+    csv_file = StringIO(csv_content)
+    reader = csv.reader(csv_file)
+    header_found = False
+    headers = []
+    
+    for row in reader:
+        if len(row) > 2 and row[0].strip() == 'Open Positions' and row[1].strip() == 'Header':
+            header_found = True
+            headers = [c.strip() for c in row]
+            continue
+        
+        if header_found and len(row) > 10 and row[0].strip() == 'Open Positions' and row[1].strip() == 'Data' and row[2].strip() == 'Summary':
+            try:
+                asset_category = row[headers.index('Asset Category')].strip()
+                if asset_category != 'Stocks':
+                    continue
+                
+                currency = row[headers.index('Currency')].strip()
+                raw_ticker = row[headers.index('Symbol')].strip()
+                quantity = float(row[headers.index('Quantity')].strip())
+                cost_basis = float(row[headers.index('Cost Basis')].strip())
+                
+                ticker = find_yahoo_ticker(raw_ticker, instrument_info_map, ticker_cache)
+                positions[ticker] = {
+                    'shares': quantity,
+                    'cost_basis': cost_basis,
+                    'currency': currency
+                }
+            except (ValueError, IndexError):
+                pass
+        
+        if header_found and row[0].strip() != 'Open Positions':
+            break
+            
+    return positions

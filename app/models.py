@@ -62,9 +62,15 @@ class TickerData:
     average_dividend_yield_5y: float
     has_div_yield_above_5y_avg: bool
     dividend_growth: DividendGrowthMetrics
-    has_div_growth_above_inflation: bool
     open_positions: List[PositionData]
     closed_positions: List[ClosedPositionData]
+    pe_actual: Optional[float] = None
+    pe_avg_10y: Optional[float] = None
+    peg_ratio: Optional[float] = None
+    yield_below_avg: bool = False
+    pe_below_avg: bool = False
+    peg_below_threshold: bool = False
+    div_growth_above_inflation: bool = False
     ratio_on_cost: float = 0.0
     ratio_on_padi: float = 0.0
     ratio_on_market_value: float = 0.0
@@ -97,6 +103,8 @@ class PortfolioSummary:
     dividends_ltm: float
     portfolio_dividend_growth_ttm_cost_weighted: float
     portfolio_dividend_growth_ttm_padi_weighted: float
+    portfolio_dividend_growth_5y_cost_weighted: float
+    portfolio_dividend_growth_5y_padi_weighted: float
     primary_currency: str
     investment_start_date: Optional[str]
     years_invested: float

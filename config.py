@@ -109,7 +109,8 @@ TIER2 = 'Tier 2'
 TIER3 = 'Tier 3'
 TIERG = 'Tier G'
 SAFETY_MARGIN = 0.10  # 10% safety margin for all tiers
-MIN_5Y_DIVIDEND_GROWTH = 0.025  # Minimum dividend growth rate (2.5%)
+INFLATION_RATE = 0.035  # Inflation rate for decision engine (3.5%)
+PEG_RATIO_THRESHOLD = 1.0  # PEG ratio threshold for growth evaluation
 
 ANALYSIS_MAP = {
     TIER1: {

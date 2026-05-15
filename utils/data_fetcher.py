@@ -65,7 +65,8 @@ def get_ticker_info_batch(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
                 "sector": info.get("sector"),
                 "industry": info.get("industry"),
                 "currency": info.get("currency"),
-                "forward_dividend": info.get("dividendRate") or info.get("forwardAnnualDividendRate") or 0.0
+                "forward_dividend": info.get("dividendRate") or info.get("forwardAnnualDividendRate") or 0.0,
+                "peg_ratio": info.get("pegRatio") or info.get("trailingPegRatio") or info.get("trailingPeg")
             }
         except Exception as e:
             print(f"Warning: Could not fetch info for {symbol}: {e}")
@@ -88,6 +89,28 @@ def get_batch_historical_rates(from_currency: str, to_currency: str, start_date:
     except Exception as e:
         print(f"Error fetching rates for {ticker_symbol}: {e}")
         return pd.DataFrame()
+
+def get_ticker_financials_batch(tickers: List[str]) -> Dict[str, pd.DataFrame]:
+    """
+    Fetches financials (income statement) for tickers.
+    Warning: .financials is slow in yfinance.
+    """
+    financials_results = {}
+    if not tickers:
+        return financials_results
+
+    print(f"DEBUG: Fetching financials for {len(tickers)} tickers (this may take a while)...")
+    ticker_objs = yf.Tickers(" ".join(tickers))
+    
+    for symbol in tickers:
+        try:
+            t = ticker_objs.tickers[symbol]
+            financials_results[symbol] = t.financials
+        except Exception as e:
+            print(f"Warning: Could not fetch financials for {symbol}: {e}")
+            financials_results[symbol] = pd.DataFrame()
+            
+    return financials_results
 
 def get_batch_history_data(tickers: List[str], period: str = "5y", start: str = None) -> pd.DataFrame:
     """

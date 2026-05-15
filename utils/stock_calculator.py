@@ -101,11 +101,15 @@ def calculate_forward_dividend(ticker: str, frequency_type: str, dividends_histo
     
     Logic:
         - Monthly & Quarterly-Regular: Last payment × Frequency
-        - Quarterly-Unregular & Semi-Annually: Sum of last N payments. If history is insufficient, annualizes the most recent payment.
+        - Quarterly-Unregular & Semi-Annually: Sum of all payments in the last 365 days (TTM).
+          This is robust against timing shifts and merged payments. 
+          Falls back to last payment annualized if no payments in the last year.
         - Annually: Last annual payment
     """
     from config import DIVIDEND_FREQ_MAP
     import logging
+    from datetime import datetime
+    import pandas as pd
     
     # Validate inputs
     if not frequency_type or frequency_type == 'N/A':
@@ -121,9 +125,19 @@ def calculate_forward_dividend(ticker: str, frequency_type: str, dividends_histo
         logging.warning(f"{ticker}: Unknown frequency type '{frequency_type}'.")
         return 0.0
     
-    # Sort dividends by date (most recent first)
+    # Sort and consolidate dividends by date
     try:
-        sorted_dividends = sorted(dividends_history, key=lambda x: x['date'], reverse=True)
+        # Consolidation: handle duplicates for the same date
+        consolidated = {}
+        for d in dividends_history:
+            dt = d['date']
+            amt = d['amount']
+            if dt not in consolidated or amt > consolidated[dt]:
+                consolidated[dt] = amt
+        
+        consolidated_history = [{"date": dt, "amount": amt} for dt, amt in consolidated.items()]
+        # Sort descending by date
+        sorted_dividends = sorted(consolidated_history, key=lambda x: x['date'], reverse=True)
     except (KeyError, TypeError) as e:
         logging.error(f"{ticker}: Invalid dividend history format: {e}")
         return 0.0
@@ -131,23 +145,31 @@ def calculate_forward_dividend(ticker: str, frequency_type: str, dividends_histo
     # Calculate based on frequency type
     forward_div = 0.0
     try:
-        if frequency_type in ['Monthly', 'Quarterly-Regulary', 'Quartely-Regulary']:
+        if frequency_type in ['Monthly', 'Quarterly-Regulary', 'Quartely-Regulary', 'Quarterly']:
             # Monthly & Quarterly-Regular: Last payment × Frequency
             last_payment = sorted_dividends[0]['amount']
             forward_div = last_payment * frequency
         
         elif frequency_type in ['Quarterly-Unregulary', 'Quartely-Unregulary', 'Semi-Annually']:
-            # Quarterly-Unregular & Semi-Annually: Sum of last N payments
-            if len(sorted_dividends) < frequency:
-                logging.warning(
-                    f"{ticker}: Insufficient dividend history for {frequency_type} "
-                    f"(need {frequency}, have {len(sorted_dividends)}). Annualizing last payment."
-                )
+            # Sum of all payments in the last 365 days (TTM)
+            today = datetime.now()
+            one_year_ago = today - pd.DateOffset(days=365)
+            
+            ttm_sum = 0.0
+            payments_found = 0
+            for div in sorted_dividends:
+                div_date = pd.to_datetime(div['date'])
+                if div_date > one_year_ago and div_date <= today:
+                    ttm_sum += div['amount']
+                    payments_found += 1
+            
+            if payments_found >= 1:
+                forward_div = ttm_sum
+            else:
+                # Fallback: annualize the most recent payment
+                logging.warning(f"{ticker}: No payments in last 365 days. Annualizing last payment.")
                 last_payment = sorted_dividends[0]['amount']
                 forward_div = last_payment * frequency
-            else:
-                last_n_payments = sorted_dividends[:frequency]
-                forward_div = sum(div['amount'] for div in last_n_payments)
         
         elif frequency_type == 'Annually':
             # Annually: Last annual payment

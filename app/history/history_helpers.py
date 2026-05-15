@@ -10,37 +10,23 @@ from utils.exchange_rate import normalize_currency, get_rate_from_cache
 from utils.analytics import convert_currency, normalize_price, calculate_cagr, calculate_yoy
 from utils.stock_calculator import calculate_padi_value, calculate_forward_dividend
 
-def _prepare_dividend_history_df(dividends_data: dict) -> pd.DataFrame:
-    """Preprocesses dividend data into a sorted DataFrame."""
-    all_dividends = []
-    for ticker, company_data in dividends_data.get('companies', {}).items():
-        for div in company_data.get('dividends', []):
-            if div.get('date') and div.get('amount'):
-                all_dividends.append({
-                    'ticker': ticker,
-                    'date': pd.Timestamp(div.get('date')),
-                    'amount': div.get('amount', 0),
-                    'currency': normalize_currency(div.get('currency')),
-                    'amount_per_share': div.get('amount_per_share'),
-                    'amount_per_share_currency': normalize_currency(div.get('amount_per_share_currency'))
-                })
-    div_df = pd.DataFrame(all_dividends)
-    if not div_df.empty:
-        div_df = div_df.sort_values('date')
-    return div_df
+
 
 def _get_history_metrics_at_date(date: pd.Timestamp, ref_str: str, transactions_df: pd.DataFrame, div_df: pd.DataFrame, market_data: dict, ticker_map_data: dict, exchange_rate_cache: dict, is_recent_me: bool) -> Tuple[float, float, float]:
-    """Calculates invested_amount, market_value, and padi for a specific date."""
-    """Calculates invested_amount, market_value, and padi for a specific date."""
+    """Calculates invested_amount, market_value, and padi for a specific date using DataFrames."""
 
+    # 1. Filter transactions open at date
     open_at_date = transactions_df[
         (transactions_df['open_date_dt'] <= date) & 
         ((transactions_df['close_date_dt'].isna()) | (transactions_df['close_date_dt'] > date))
     ]
     
-    invested_amount = 0
-    market_value = 0
-    padi_at_date = 0
+    if open_at_date.empty:
+        return 0.0, 0.0, 0.0
+
+    # 2. Calculate invested amount (vectorized for same currency, otherwise loop)
+    # Simple loop for conversion since it depends on individual dates/currencies
+    invested_amount = 0.0
     current_holdings = defaultdict(float)
     
     for _, pos in open_at_date.iterrows():
@@ -48,6 +34,10 @@ def _get_history_metrics_at_date(date: pd.Timestamp, ref_str: str, transactions_
         invested_amount += convert_currency(pos['purchase_value'], currency, PRIMARY_CURRENCY, pos['open_date'], exchange_rate_cache, get_rate_from_cache)
         current_holdings[pos['ticker']] += pos['shares']
         
+    # 3. Calculate market value and PADI
+    market_value = 0.0
+    padi_at_date = 0.0
+    
     for ticker, shares in current_holdings.items():
         ticker_cache = market_data.get('tickers', {}).get(ticker, {})
         static_info = ticker_cache.get('static', {})
@@ -76,45 +66,31 @@ def _get_history_metrics_at_date(date: pd.Timestamp, ref_str: str, transactions_
         if price is not None:
             market_value += convert_currency(shares * price, price_currency, PRIMARY_CURRENCY, ref_str, exchange_rate_cache, get_rate_from_cache)
 
-        # Calculate forward dividend from historical data
+        # Calculate forward dividend from official historical data (Yahoo)
         div_frequency_str = ticker_map_data.get('ticker_info', {}).get(ticker, {}).get('div_frequency', 'N/A')
         dividends_history = dynamic_data.get('dividends', [])
         
-        forward_dividend = calculate_forward_dividend(
-            ticker=ticker,
-            frequency_type=div_frequency_str,
-            dividends_history=dividends_history,
-            currency=price_currency
-        )
-        
-        if is_recent_me and forward_dividend > 0:
-            padi_ticker = calculate_padi_value(shares, forward_dividend)
-            padi_at_date += convert_currency(padi_ticker, price_currency, PRIMARY_CURRENCY, ref_str, exchange_rate_cache, get_rate_from_cache)
-        else:
-            # For historical dates, we need to calculate forward dividend based on dividends known at that time
-            # to avoid lookahead bias. We use the 'dividends_history' specific to the ticker.
-            
-            # Filter dividends up to the historical date
-            hist_dividends_data = [
-                div for div in dividends_history # dividends_history is dynamic_data.get('dividends', [])
-                if 'date' in div and pd.Timestamp(div['date']) <= date
-            ]
+        # Filter official dividends up to the historical date
+        hist_dividends_data = [
+            div for div in dividends_history 
+            if 'date' in div and pd.to_datetime(div['date']) <= date
+        ]
 
-            if hist_dividends_data:
-                try:
-                    forward_dividend_hist = calculate_forward_dividend(
-                        ticker=ticker,
-                        frequency_type=div_frequency_str,
-                        dividends_history=hist_dividends_data,
-                        currency=price_currency
-                    )
-                    
-                    if forward_dividend_hist > 0:
-                        padi_hist = calculate_padi_value(shares, forward_dividend_hist) # annualized
-                        padi_at_date += convert_currency(padi_hist, price_currency, PRIMARY_CURRENCY, ref_str, exchange_rate_cache, get_rate_from_cache)
+        if hist_dividends_data:
+            try:
+                forward_dividend_hist = calculate_forward_dividend(
+                    ticker=ticker,
+                    frequency_type=div_frequency_str,
+                    dividends_history=hist_dividends_data,
+                    currency=price_currency
+                )
+                
+                if forward_dividend_hist > 0:
+                    padi_hist = calculate_padi_value(shares, forward_dividend_hist)
+                    padi_at_date += convert_currency(padi_hist, price_currency, PRIMARY_CURRENCY, ref_str, exchange_rate_cache, get_rate_from_cache)
 
-                except Exception as e:
-                    logging.warning(f"Could not calculate historical forward dividend for {ticker} at {date}: {e}")
+            except Exception as e:
+                logging.warning(f"Could not calculate historical forward dividend for {ticker} at {date}: {e}")
 
     return invested_amount, market_value, padi_at_date
 

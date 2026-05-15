@@ -38,12 +38,25 @@ def run_single_parser(broker_name: str) -> tuple[dict, dict, dict, dict | None]:
     Runs the parser for a single specified broker and returns the parsed data.
     """
     cash_balance = None
+    open_positions = {}
     if broker_name == 'xtb':
         accounts_to_parse = XTB_ACCOUNTS
     elif broker_name == 'ibkr':
         accounts_to_parse = IBKR_ACCOUNTS
         print("Parsing cash balance...")
         cash_balance = get_ending_cash_balance_from_csv_files(accounts_to_parse)
+        
+        # We also peek at open positions to verify history completeness
+        from parser.brokers.ibkr import _parse_open_positions, _get_instrument_info
+        ticker_cache = get_ticker_cache()
+        for file_path in accounts_to_parse:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                info_map = _get_instrument_info(content)
+                open_positions.update(_parse_open_positions(content, info_map, ticker_cache))
+            except Exception:
+                pass
     else:
         raise ValueError(f"Broker '{broker_name}' is not configured.")
 
@@ -52,6 +65,14 @@ def run_single_parser(broker_name: str) -> tuple[dict, dict, dict, dict | None]:
     
     print("Parsing transactions...")
     transactions_data = parser_funcs["get_transactions"](accounts_to_parse)
+    
+    # Verification logic for IBKR: check if open positions from statement are in transaction history
+    if broker_name == 'ibkr' and open_positions:
+        history_tickers = set(transactions_data.get('companies', {}).keys())
+        missing_tickers = set(open_positions.keys()) - history_tickers
+        if missing_tickers:
+            print(f"\n[bold yellow]Warning:[/bold yellow] The following stocks are in your 'Open Positions' but have NO trades in the current statement(s): {', '.join(missing_tickers)}")
+            print("This usually means they were bought in a previous period. These stocks will be MISSING from your tracker if not already in your history file.")
     
     print("Parsing cash operations and dividends...")
     dividends_data, other_cash_ops = parser_funcs["get_cash_operations"](accounts_to_parse)

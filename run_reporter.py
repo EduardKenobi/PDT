@@ -65,6 +65,8 @@ def print_portfolio_summary_rich(console: Console, portfolio_summary: Dict):
     div_table.add_row("Yield on Cost", f"{portfolio_summary['dividend_yield_on_cost']:+.2%}")
     div_table.add_row("Growth TTM (cost-weighted)", f"{portfolio_summary['portfolio_dividend_growth_ttm_cost_weighted']:+.2%}")
     div_table.add_row("Growth TTM (PADI-weighted)", f"{portfolio_summary['portfolio_dividend_growth_ttm_padi_weighted']:+.2%}")
+    div_table.add_row("Growth 5Y (cost-weighted)", f"{portfolio_summary['portfolio_dividend_growth_5y_cost_weighted']:+.2%}")
+    div_table.add_row("Growth 5Y (PADI-weighted)", f"{portfolio_summary['portfolio_dividend_growth_5y_padi_weighted']:+.2%}")
 
     console.print(perf_table)
     console.print(div_table)
@@ -448,6 +450,28 @@ def print_dividend_summary_table_enhanced(console: Console, portfolio_summary: D
     console.print(table)
 
 
+def _generate_valuation_table(details: Dict) -> Table:
+    """
+    Generates a formatted valuation table for a ticker.
+    """
+    if not details:
+        return None
+    
+    pe_actual = details.get('pe_actual')
+    pe_avg_10y = details.get('pe_avg_10y')
+    
+    if pe_actual is None and pe_avg_10y is None:
+        return None
+
+    table = Table(title="Valuation", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Metric", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    table.add_row("P/E Actual", f"{pe_actual:.2f}" if pe_actual is not None else "N/A")
+    table.add_row("P/E 10Y Avg.", f"{pe_avg_10y:.2f}" if pe_avg_10y is not None else "N/A")
+
+    return table
+
 def print_stock_summary_rich(console: Console, all_tickers_data: Dict[str, Dict], portfolio_value: float, dividends_data: Dict[str, List[Dict]], tickers_to_show: List[str] = None):
     """
     Prints the stock summary output to the console using Rich tables.
@@ -489,6 +513,10 @@ def print_stock_summary_rich(console: Console, all_tickers_data: Dict[str, Dict]
             # --- Performance ---
             perf_table = _generate_stock_performance_table(details)
             if perf_table: tables_to_print.append(perf_table)
+
+            # --- Valuation ---
+            valuation_table = _generate_valuation_table(details)
+            if valuation_table: tables_to_print.append(valuation_table)
 
             # --- Dividends Metrics ---
             div_table = _generate_div_metrics_table(details, price_currency)
@@ -597,6 +625,75 @@ def print_dividend_history_chart(console: Console, portfolio_summary: Dict):
     console.print(table)
 
 
+def print_decision_engine_rich(console: Console, all_tickers_data: Dict[str, Dict]):
+    """
+    Prints the Decision Engine summary table.
+    """
+    table = Table(title="Decision Engine", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Ticker", style="cyan", no_wrap=True)
+    table.add_column("TIER", justify="center")
+    table.add_column("PADI", justify="right")
+    table.add_column("MV Ratio", justify="right")
+    table.add_column("PADI Ratio", justify="right")
+    table.add_column("DY Actual", justify="right")
+    table.add_column("DY 5Y Avg", justify="right")
+    table.add_column("PE Actual", justify="right")
+    table.add_column("PE 10Y Avg", justify="right")
+    table.add_column("DG 5Y CAGR", justify="right")
+    table.add_column("PEG Ratio", justify="right")
+    table.add_column("DY > Avg", justify="center")
+    table.add_column("PE < Avg", justify="center")
+    table.add_column("DG > Infl", justify="center")
+    table.add_column("PEG < 1", justify="center")
+    
+
+    owned_tickers = sorted([t for t, data in all_tickers_data.items() if data.get('current_shares', 0) > 0])
+
+    if not owned_tickers:
+        console.print("[yellow]No owned tickers to analyze in Decision Engine.[/yellow]")
+        return
+
+    for ticker in owned_tickers:
+        details = all_tickers_data[ticker]
+        tier = details.get('tier_group', 'N/A')
+        padi = details.get('padi', 0)
+        mv_ratio = details.get('ratio_on_market_value', 0)
+        padi_ratio = details.get('ratio_on_padi', 0)
+        dy_flag = details.get('yield_below_avg', False)
+        dy_actual = details.get('dividend_yield')
+        dy_5y_avg = details.get('average_dividend_yield_5y')
+        pe_flag = details.get('pe_below_avg', False)
+        pe_actual = details.get('pe_actual')
+        pe_10y_avg = details.get('pe_avg_10y')
+        dg_flag = details.get('div_growth_above_inflation', False)
+        dg_5y_cagr = details.get('dividend_growth', {}).get('cagr_5y')
+        peg_flag = details.get('peg_below_threshold', False)
+        peg_ratio = details.get('peg_ratio')
+
+        def _format_flag(val):
+            return "[green]T[/green]" if val else "[red]F[/red]"
+
+        table.add_row(
+            ticker,
+            f"{tier}" if tier is not None else "N/A",
+            f"{padi:.2f}" if padi is not None else "N/A",
+            f"{mv_ratio:.2%}" if mv_ratio is not None else "N/A",
+            f"{padi_ratio:.2%}" if padi_ratio is not None else "N/A",
+            f"{dy_actual:.2%}" if dy_actual is not None else "N/A",
+            f"{dy_5y_avg:.2%}" if dy_5y_avg is not None else "N/A",
+            f"{pe_actual:.2f}" if pe_actual is not None else "N/A",
+            f"{pe_10y_avg:.2f}" if pe_10y_avg is not None else "N/A",
+            f"{dg_5y_cagr:.2%}" if dg_5y_cagr is not None else "N/A",
+            f"{peg_ratio:.2f}" if peg_ratio is not None else "N/A",
+            _format_flag(dy_flag),
+            _format_flag(pe_flag),
+            _format_flag(dg_flag),
+            _format_flag(peg_flag)
+        )
+
+    console.print(table)
+
+
 def main():
     """
     Main function to run the stock reporter.
@@ -624,6 +721,7 @@ def main():
         "Portfolio History",
         "Dividend Summary",
         "Dividend History",
+        "Decision Engine",
         "Exit"
     ]
     
@@ -689,6 +787,9 @@ def main():
             
             elif choice == CHOICE_PORTFOLIO_HISTORY:
                 print_portfolio_history_rich(console, portfolio_history)
+
+            elif choice == "Decision Engine":
+                print_decision_engine_rich(console, all_tickers_data)
 
             elif choice == CHOICE_EXIT:
                 print("Exiting reporter.")

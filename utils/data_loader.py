@@ -3,15 +3,17 @@ import pandas as pd
 import json
 import ast
 import os
-from app.history.history_helpers import _get_month_ends, _prepare_dividend_history_df
+from app.history.history_helpers import _get_month_ends
+from utils.exchange_rate import normalize_currency
 from config import (
     TRANSACTIONS_OUTPUT_FILE, 
     DIVIDEND_OUTPUT_FILE, 
     TICKER_MAP_FILE, 
-    CASH_OPERATIONS_OUTPUT_FILE,
     MARKET_DATA_OUTPUT,
     CASH_FLOW_CATEGORIZATION_FILE,
-    STOCK_ANALYSIS_OUTPUT
+    STOCK_ANALYSIS_OUTPUT,
+    PRIMARY_CURRENCY,
+    CASH_OPERATIONS_OUTPUT_FILE
 )
 
 def convert_df_columns_to_numeric(df, columns):
@@ -107,23 +109,39 @@ def prepare_data(transactions_df):
 
 def load_all_data():
     """
-    Load all necessary data files with error handling.
+    Load all necessary data files with error handling and return as DataFrames.
     """
     try:
+        # 1. Transactions
         transactions_df = load_nested_yaml_to_dataframe(TRANSACTIONS_OUTPUT_FILE, 'transactions')
-        # Define numeric columns that should be numeric
         numeric_columns = ['shares', 'open_price', 'close_price', 'purchase_value', 'sale_value', 'gross_pl_amount', 'gross_pl_percent']
         transactions_df = convert_df_columns_to_numeric(transactions_df, numeric_columns)
-        dividends_data = load_yaml(DIVIDEND_OUTPUT_FILE)
+        transactions_df['open_date_dt'] = pd.to_datetime(transactions_df['open_date'])
+        transactions_df['close_date_dt'] = pd.to_datetime(transactions_df['close_date'])
+        
+        # 2. Dividends
+        dividends_raw = load_yaml(DIVIDEND_OUTPUT_FILE)
+        div_df = _prepare_dividend_history_df(dividends_raw)
+        
+        # 3. Ticker Map
         ticker_map_data = load_yaml(TICKER_MAP_FILE)
-        cash_operations_data = load_yaml(CASH_OPERATIONS_OUTPUT_FILE)
-        all_tickers = prepare_data(transactions_df)
+        
+        # 4. Cash Operations
+        cash_ops_raw = load_yaml(CASH_OPERATIONS_OUTPUT_FILE)
+        other_ops_df = pd.DataFrame(cash_ops_raw.get('other_operations', []))
+        if not other_ops_df.empty:
+            other_ops_df['date_dt'] = pd.to_datetime(other_ops_df['date'])
+            # Convert currency to standard format
+            if 'currency' in other_ops_df.columns:
+                other_ops_df['currency'] = other_ops_df['currency'].str.upper().replace('GBX', 'GBP').replace('GBP', 'GBP') # GBp/GBX handling
+        
+        all_tickers = transactions_df['ticker'].unique() if not transactions_df.empty else []
         month_ends = _get_month_ends()
-        div_df = _prepare_dividend_history_df(dividends_data)
-        return transactions_df, dividends_data, ticker_map_data, cash_operations_data, all_tickers, month_ends, div_df
-    except (FileNotFoundError, ValueError) as e:
+        
+        return transactions_df, dividends_raw, ticker_map_data, cash_ops_raw, all_tickers, month_ends, div_df, other_ops_df
+    except (FileNotFoundError, ValueError, Exception) as e:
         print(f"Error loading source data: {e}")
-        return None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None
 
 def rehydrate_data(data):
     """
@@ -198,3 +216,24 @@ def load_dividends_data():
     """
 
     return load_yaml(DIVIDEND_OUTPUT_FILE)
+
+def _prepare_dividend_history_df(dividends_data: dict) -> pd.DataFrame:
+    """Preprocesses dividend data into a sorted DataFrame."""
+    all_dividends = []
+    for ticker, company_data in dividends_data.get('companies', {}).items():
+        for div in company_data.get('dividends', []):
+            if div.get('date') and div.get('amount'):
+                all_dividends.append({
+                    'ticker': ticker,
+                    'date': pd.Timestamp(div.get('date')),
+                    'amount': div.get('amount', 0),
+                    'currency': normalize_currency(div.get('currency')),
+                    'amount_per_share': div.get('amount_per_share'),
+                    'amount_per_share_currency': normalize_currency(div.get('amount_per_share_currency'))
+                })
+    div_df = pd.DataFrame(all_dividends)
+    if not div_df.empty:
+        div_df['date'] = pd.to_datetime(div_df['date'])
+        div_df = div_df.sort_values('date').set_index('date', drop=False)
+        div_df.index.name = None
+    return div_df

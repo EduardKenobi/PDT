@@ -1,36 +1,45 @@
+from logging import warning, error
+
 import pandas as pd
 from datetime import datetime, timedelta
 from app.portfolio.portfolio_metrics import get_rate_from_cache
 from config import PRIMARY_CURRENCY, DIVIDEND_FREQ_MAP
 import calendar
 from calendar import month_name
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from utils.analytics import calculate_cagr
 
-def get_historical_dividend_dates(ticker: str, all_dividends_data: dict, cached_history: Optional[List[str]] = None) -> List[datetime]:
+def get_historical_dividend_dates(ticker: str, all_dividends_data: pd.DataFrame, cached_history: Optional[List[str]] = None) -> List[datetime]:
     """
     Gets a reliable list of historical dividend dates.
     Prioritizes local payment dates. Falls back to cached history.
     """
     # 1. Try local payment dates first (from broker reports)
-    local_ticker_dividends = all_dividends_data.get('companies', {}).get(ticker, {}).get('dividends', [])
-    if local_ticker_dividends:
-        payment_dates = sorted([pd.to_datetime(div['date']) for div in local_ticker_dividends], reverse=True)
-        if len(payment_dates) >= 2:
-            return payment_dates
+    if isinstance(all_dividends_data, pd.DataFrame) and not all_dividends_data.empty:
+        local_ticker_dividends_df = all_dividends_data[all_dividends_data['ticker'] == ticker]
+        if not local_ticker_dividends_df.empty:
+            payment_dates = sorted(local_ticker_dividends_df['date'].tolist(), reverse=True)
+            if len(payment_dates) >= 2:
+                return payment_dates
+            
+    # Fallback for dict (backward compatibility if needed)
+    elif isinstance(all_dividends_data, dict):
+        local_ticker_dividends = all_dividends_data.get('companies', {}).get(ticker, {}).get('dividends', [])
+        if local_ticker_dividends:
+            payment_dates = sorted([pd.to_datetime(div['date']) for div in local_ticker_dividends], reverse=True)
+            if len(payment_dates) >= 2:
+                return payment_dates
 
     # 2. Fallback to cached history (from yfinance fetched in update_market_data)
     if cached_history:
         return sorted([pd.to_datetime(date) for date in cached_history], reverse=True)
 
-    # 3. Return what we have
-    if local_ticker_dividends:
-        return sorted([pd.to_datetime(div['date']) for div in local_ticker_dividends], reverse=True)
-    
-    return []
-
-    # 3. Return empty if no source found, but check for any remaining local dates
-    if local_ticker_dividends:
+    # 3. Final fallback
+    if isinstance(all_dividends_data, pd.DataFrame) and not all_dividends_data.empty:
+        local_ticker_dividends_df = all_dividends_data[all_dividends_data['ticker'] == ticker]
+        return sorted(local_ticker_dividends_df['date'].tolist(), reverse=True)
+    elif isinstance(all_dividends_data, dict):
+        local_ticker_dividends = all_dividends_data.get('companies', {}).get(ticker, {}).get('dividends', [])
         return sorted([pd.to_datetime(div['date']) for div in local_ticker_dividends], reverse=True)
     
     return []
@@ -76,93 +85,84 @@ def calculate_average_dividend_yield(ticker, history_df):
 
     return sum(annual_yields) / len(annual_yields)
 
-def _calculate_annual_dividend_up_to_date(ref_date: datetime, dividends: pd.Series) -> float:
+def _get_annualized_dividend_at_date(ticker: str, ref_date: datetime, dividends: pd.Series, frequency_type: str, freq: int) -> float:
     """
-    Calculates the annualized dividend up to a specific point in time by summing trailing 12 months,
-    inclusive of the ref_date. Used for CAGR.
+    Calculates the annualized dividend rate at a specific point in time.
+    Consistent with calculate_forward_dividend logic.
+    Possible error case: return 0 if company just started payind unregular/semi-annual dividends
+    and history is insufficient to annualize (e.g. only 1 payment for quarterly-unregular).
+    This is intentional to avoid misleading annualized rates based on very limited data.
     """
-    past_divs = dividends[dividends.index <= ref_date]
+    past_divs = dividends[dividends.index <= ref_date].sort_index(ascending=False)
     if past_divs.empty:
         return 0.0
-    t12m_start = ref_date - pd.DateOffset(months=12)
-    return float(past_divs[past_divs.index >= t12m_start].sum())
 
-def _calculate_annualized_dividend_ttm_monthly(calc_for_date: datetime, dividends: pd.Series, freq: int) -> float:
-    """
-    Calculates the TTM dividend based on a monthly cycle, excluding the current month
-    and going back 12 full months.
-    E.g., if calc_for_date is Feb 16, 2026, it sums dividends from Feb 1, 2025 to Jan 31, 2026.
-    """
-    ttm_end_date = calc_for_date - pd.DateOffset(months=1) # Go back to previous month
-    ttm_end_date = ttm_end_date.replace(day=calendar.monthrange(ttm_end_date.year, ttm_end_date.month)[1]) # Set to last day of prev month
-
-    # Then go back 12 months from that point
-    past_divs = dividends.tail(freq)
-    if past_divs.empty:
+    try:
+        if frequency_type in ['Monthly', 'Quarterly-Regulary', 'Quartely-Regulary', 'Quarterly']:
+            # Check for NaN/NA first, then for 0
+            if pd.isna(past_divs.iloc[0]) or past_divs.iloc[0] == 0:
+                warning(f"Dividend amount is zero or NaN for {ticker} at {ref_date}. Cannot annualize.")
+                return 0.0
+            # Last payment × Frequency
+            return float(past_divs.iloc[0]) * freq
+        elif frequency_type in ['Quarterly-Unregulary', 'Quartely-Unregulary', 'Semi-Annually']:
+            # Sum of payments based on frequency type
+            ttm_divs = past_divs.head(freq)
+            # If there is a zero, NaN or less than freq payments, we cannot annualize reliably
+            if ttm_divs.isna().any() or (ttm_divs == 0).any() or len(ttm_divs) < freq:
+                warning(f"Dividend history is insufficient for reliable annualization for {ticker} at {ref_date}. History: {past_divs.tolist()}")
+                return 0.0
+            return float(ttm_divs.sum())
+        elif frequency_type in ['Annually']:
+            if pd.isna(past_divs.iloc[0]) or past_divs.iloc[0] == 0:
+                warning(f"Dividend amount is zero or NaN for {ticker} at {ref_date}. Cannot annualize.")
+                return 0.0
+            return float(past_divs.iloc[0])
+        else:
+            warning(f"Unknown frequency type '{frequency_type}' for {ticker}. Cannot annualize.")
+            return 0.0
+            
+    except (IndexError, TypeError) as e:
+        error(f"Error calculating annualized dividend for {ticker} at {ref_date}: {e}")
         return 0.0
-    
-    return float(past_divs.sum())
 
 
-def calculate_dividend_growth(dividends_history: List[Dict], div_frequency_str: str, currency: str = '', forward_dividend: float = 0.0) -> Dict[str, Optional[tuple]]:
+def calculate_dividend_growth(ticker: str, dividends_df: pd.DataFrame, div_frequency_str: str, currency: str = '', forward_dividend: float = 0.0) -> Dict[str, Optional[tuple]]:
     """
     Calculates dividend growth for various periods: TTM, and 3, 5, 10-year CAGR.
-    CAGR is the annualized growth rate.
+    Uses frequency-aware annualized rates for robust comparisons.
     """
     growth_metrics = {
         'ttm': None,
-        '3y': None,
-        '5y': None,
-        '10y': None
+        'cagr_3y': None,
+        'cagr_5y': None,
+        'cagr_10y': None
     }
 
-    if not dividends_history:
-        return growth_metrics
-
-    # Convert list of dicts to DataFrame
-    dividends_df = pd.DataFrame(dividends_history)
-    dividends_df['date'] = pd.to_datetime(dividends_df['date'])
-    dividends_df = dividends_df.set_index('date')['amount']
-
     if dividends_df.empty:
         return growth_metrics
+
+    # dividends_df is expected to have 'date' (index) and 'amount' columns
+    # and already be pre-filtered/cleaned by data_loader
     
-    # Ensure numeric types
-    dividends_df = pd.to_numeric(dividends_df, errors='coerce')
-    dividends_df = dividends_df[dividends_df > 0].dropna() # Filter out zero or NaN dividends
-
-    if dividends_df.empty:
-        return growth_metrics
-
-    if dividends_df.index.tz is not None:
-        dividends_df.index = dividends_df.index.tz_localize(None)
-
-    # Handle GBp to GBP conversion: If currency is GBP-related and dividend values seem to be in pence, convert.
-    # A heuristic: if dividend is > 10, it's likely in pence and should be divided by 100.
-    if currency in ['GBp', 'GBP', 'GBX'] and dividends_df.max() > 10:
-        dividends_df = dividends_df / 100.0
-
-    # Deduplicate by date: if multiple entries exist for the same day, take the max one (usually the base DPS).
-    dividends = dividends_df.groupby(level=0).max()
+    # Handle GBp to GBP conversion if not already handled by loader
+    if currency in ['GBp', 'GBP', 'GBX'] and dividends_df['amount'].max() > 10:
+        dividends_df = dividends_df.copy()
+        dividends_df['amount'] = dividends_df['amount'] / 100.0
 
     # Get frequency multiplier for annualization
-    freq = DIVIDEND_FREQ_MAP.get(div_frequency_str)
+    freq = DIVIDEND_FREQ_MAP.get(div_frequency_str, 4)
     today = datetime.now()
 
-    # --- Calculation for TTM ---
-    # div_now_ttm = 0
-    # if forward_dividend > 0:
-    #     div_now_ttm = forward_dividend
-    # else:
-    #     div_now_ttm = _calculate_annualized_dividend_ttm_monthly(today, dividends)
+    # Consolidate by date to avoid double counting
+    dividends_df = dividends_df.groupby(dividends_df.index).agg({'amount': 'max'}).sort_index()
 
-    div_now_ttm = _calculate_annualized_dividend_ttm_monthly(today, dividends, freq)
+    # --- Calculation for TTM ---
+    div_now_ttm = _get_annualized_dividend_at_date(ticker, today, dividends_df['amount'], div_frequency_str, freq)
 
     # 1. TTM Growth
-    # Calculate div_1y_ago for TTM
     one_year_ago_date = today - pd.DateOffset(years=1)
-    dividends_one_year_ago = dividends[dividends.index <= one_year_ago_date]
-    div_1y_ago_ttm = _calculate_annualized_dividend_ttm_monthly(one_year_ago_date, dividends_one_year_ago, freq)
+    div_1y_ago_ttm = _get_annualized_dividend_at_date(ticker, one_year_ago_date, dividends_df['amount'], div_frequency_str, freq)
 
     if div_1y_ago_ttm > 0:
         growth_amount = div_now_ttm - div_1y_ago_ttm
@@ -171,42 +171,44 @@ def calculate_dividend_growth(dividends_history: List[Dict], div_frequency_str: 
     elif div_now_ttm > 0:
         growth_metrics['ttm'] = (div_now_ttm, None)
 
-    # Use _calculate_annual_dividend_up_to_date for CAGR to sum dividends up to the specific year's end date
-    div_now_cagr_base = _calculate_annual_dividend_up_to_date(today, dividends)
+    # --- Calculation for CAGR ---
+    # div_now_ttm already calculated above
+    div_now_cagr_base = div_now_ttm
 
     for years in [3, 5, 10]:
-        div_then_cagr = _calculate_annual_dividend_up_to_date(today - pd.DateOffset(years=years), dividends)
+        ref_date_then = today - pd.DateOffset(years=years)
+        div_then_cagr = _get_annualized_dividend_at_date(ticker, ref_date_then, dividends_df['amount'], div_frequency_str, freq)
         if div_then_cagr > 0 and div_now_cagr_base > 0:
-            growth_metrics[f'{years}y'] = calculate_cagr(div_now_cagr_base, div_then_cagr, years)
+            growth_metrics[f'cagr_{years}y'] = calculate_cagr(div_now_cagr_base, div_then_cagr, years)
 
     return growth_metrics
 
 
-def calculate_total_dividends(ticker, all_dividends_data, exchange_rate_cache, primary_currency):
+def calculate_total_dividends(ticker: str, dividends_df: pd.DataFrame, exchange_rate_cache: dict, primary_currency: str):
     """
-    Calculates the total dividends for a given ticker, converting currencies if necessary.
+    Calculates the total dividends for a given ticker using the centralized DataFrame.
     """
-    total_dividends = 0
-    total_tax = 0
-    if not all_dividends_data:
-        return total_dividends, total_tax
+    if dividends_df.empty:
+        return 0.0, 0.0
 
-    ticker_dividends = all_dividends_data.get('companies', {}).get(ticker, {}).get('dividends', [])
+    ticker_divs = dividends_df[dividends_df['ticker'] == ticker]
+    if ticker_divs.empty:
+        return 0.0, 0.0
 
-    for dividend in ticker_dividends:
-        amount = dividend.get('amount', 0)
-        currency = dividend.get('currency')
-        date = dividend.get('date')
-        tax = dividend.get('withholding_tax')
+    total_dividends = 0.0
+    total_tax = 0.0
 
-        if not currency or not date:
-            continue
+    for _, div in ticker_divs.iterrows():
+        amount = div.get('amount', 0)
+        currency = div.get('currency')
+        date_str = div['date'].strftime('%Y-%m-%d')
+        tax = div.get('withholding_tax', 0)
 
         if currency == primary_currency:
             total_dividends += amount
             total_tax += tax
         else:
-            rate = get_rate_from_cache(exchange_rate_cache, currency, primary_currency, date)
+            rate = get_rate_from_cache(exchange_rate_cache, currency, primary_currency, date_str)
             if rate:
                 total_dividends += amount * rate
                 total_tax += tax * rate
@@ -236,39 +238,39 @@ def get_dividend_payment_months(dividend_dates: List[datetime]) -> List[int]:
     return payment_months
 
 
-def get_realized_gain_and_cost(closed_positions: dict, exchange_rate_cache: dict) -> float:
+def get_realized_gain_and_cost(closed_positions: pd.DataFrame, exchange_rate_cache: dict) -> Tuple[float, float]:
     """
     Calculate total realized gain and cost of closed positions in primary currency for a ticker.
     Args:
-        closed_positions (dict): DataFrame of closed positions for a ticker.
+        closed_positions (pd.DataFrame): DataFrame of closed positions for a ticker.
         exchange_rate_cache (dict): Cache of exchange rates.
     Returns:
         tuple: (total_realized_gain_primary, total_cost_of_closed_positions_primary)
     """
 
-    total_realized_gain_primary = 0
-    total_cost_of_closed_positions_primary = 0
+    total_realized_gain_primary = 0.0
+    total_cost_of_closed_positions_primary = 0.0
+
+    if closed_positions.empty:
+        return 0.0, 0.0
 
     for _, closed_pos in closed_positions.iterrows():
-            gain = closed_pos.get('gross_pl_amount', 0)
-            cost = closed_pos.get('purchase_value', 0)
-            currency = closed_pos.get('currency')
-            open_date = closed_pos.get('open_date')
-            close_date = closed_pos.get('close_date')
+        gain = closed_pos.get('gross_pl_amount', 0)
+        cost = closed_pos.get('purchase_value', 0)
+        currency = closed_pos.get('currency')
+        open_date = closed_pos.get('open_date')
+        close_date = closed_pos.get('close_date')
 
-            if not currency or not close_date or not open_date:
-                continue
-
-            if currency == PRIMARY_CURRENCY:
-                total_realized_gain_primary += gain
-                total_cost_of_closed_positions_primary += cost
-            else:
-                rate_gain = get_rate_from_cache(exchange_rate_cache, currency, PRIMARY_CURRENCY, close_date)
-                rate_cost = get_rate_from_cache(exchange_rate_cache, currency, PRIMARY_CURRENCY, open_date)
-                if rate_gain:
-                    total_realized_gain_primary += gain * rate_gain
-                if rate_cost:
-                    total_cost_of_closed_positions_primary += cost * rate_cost
+        if currency == PRIMARY_CURRENCY:
+            total_realized_gain_primary += gain
+            total_cost_of_closed_positions_primary += cost
+        else:
+            rate_gain = get_rate_from_cache(exchange_rate_cache, currency, PRIMARY_CURRENCY, close_date)
+            rate_cost = get_rate_from_cache(exchange_rate_cache, currency, PRIMARY_CURRENCY, open_date)
+            if rate_gain:
+                total_realized_gain_primary += gain * rate_gain
+            if rate_cost:
+                total_cost_of_closed_positions_primary += cost * rate_cost
 
     return total_realized_gain_primary, total_cost_of_closed_positions_primary
 
@@ -298,7 +300,7 @@ def _find_next_month_from_pattern(payment_months: List[int], today: datetime, la
     return next_payment_month, predicted_year
 
 
-def predict_next_dividend_month(ticker: str, all_dividends_data: dict, div_frequency: str, dividend_dates: List[datetime], payment_months: List[int] = None) -> str:
+def predict_next_dividend_month(ticker: str, all_dividends_data: pd.DataFrame, div_frequency: str, dividend_dates: List[datetime], payment_months: List[int] = None) -> str:
     """
     Predicts the month and year of the next dividend payment based on historical data pattern.
     Only uses payment_months to determine the next date.
@@ -352,9 +354,11 @@ def _predict_dividend_per_share(future_date: datetime, div_frequency: str, sorte
     return {'amount': latest_dividend.get('amount_per_share'), 'currency': latest_dividend.get('amount_per_share_currency')}
 
 
-def predict_dividend_income_calendar(all_tickers_data: Dict, dividends_data: Dict, exchange_rate_cache: Dict, timeframe_months: int = 12) -> Dict[str, float]:
+def predict_dividend_income_calendar(all_tickers_data: Dict, dividends_df: pd.DataFrame, exchange_rate_cache: Dict, timeframe_months: int = 12) -> Dict[str, float]:
     """
     Predicts the dividend income calendar for the next 12 months.
+    Uses TickerData metrics (padi, div_frequency) for reliable projections, 
+    falling back to historical local data if needed.
     """
     projected_income_calendar = {}
     
@@ -365,18 +369,18 @@ def predict_dividend_income_calendar(all_tickers_data: Dict, dividends_data: Dic
         if details.current_shares <= 0:
             continue
 
-        div_frequency = details.div_frequency
+        div_frequency_str = details.div_frequency
         payment_months = details.dividend_payment_months
-        current_shares = details.current_shares
+        padi = details.padi # Annualized income in PRIMARY_CURRENCY
 
-        if not payment_months or not div_frequency:
+        if not payment_months or not div_frequency_str or div_frequency_str == 'N/A':
             continue
 
-        history = dividends_data.get('companies', {}).get(ticker, {}).get('dividends', [])
-        if not history:
+        freq_multiplier = DIVIDEND_FREQ_MAP.get(div_frequency_str, 4)
+        income_per_payment = padi / freq_multiplier if freq_multiplier > 0 else 0
+
+        if income_per_payment <= 0:
             continue
-        
-        history.sort(key=lambda x: pd.to_datetime(x['date']), reverse=True)
 
         future_payment_dates = []
         for year_offset in range(2):
@@ -390,24 +394,25 @@ def predict_dividend_income_calendar(all_tickers_data: Dict, dividends_data: Dic
                     continue
         
         for payment_date in future_payment_dates:
-            predicted_dps = _predict_dividend_per_share(
-                payment_date, div_frequency, history
-            )
-
-            if not predicted_dps or predicted_dps.get('amount') is None:
-                continue
-
-            total_dividend = predicted_dps['amount'] * current_shares
-            
-            income_primary_currency = total_dividend
-            if predicted_dps['currency'] != PRIMARY_CURRENCY:
-                rate = get_rate_from_cache(exchange_rate_cache, predicted_dps['currency'], PRIMARY_CURRENCY, today.strftime('%Y-%m-%d'))
-                if rate:
-                    income_primary_currency *= rate
-                else:
-                    continue
-            
             month_year_str = f"{month_name[payment_date.month]} {payment_date.year}"
-            projected_income_calendar[month_year_str] = projected_income_calendar.get(month_year_str, 0.0) + income_primary_currency
+            projected_income_calendar[month_year_str] = projected_income_calendar.get(month_year_str, 0.0) + income_per_payment
 
     return projected_income_calendar
+
+def is_div_growth_above_inflation(div_growth_metrics: Dict[str, Optional[tuple]], inflation_rate: float) -> bool:
+    """
+    Determines if the dividend growth is above the inflation rate based on available metrics.
+    Prioritizes 5-year CAGR, then 3-year CAGR, then TTM growth percentage.
+    """
+    cagr_5y = div_growth_metrics.get('cagr_5y')
+    cagr_3y = div_growth_metrics.get('cagr_3y')
+    ttm_growth = div_growth_metrics.get('ttm')
+
+    if cagr_5y is not None:
+        return cagr_5y > inflation_rate
+    elif cagr_3y is not None:
+        return cagr_3y > inflation_rate
+    elif ttm_growth and ttm_growth[1] is not None:
+        return ttm_growth[1] > inflation_rate
+
+    return False
