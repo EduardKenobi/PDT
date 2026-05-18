@@ -2,14 +2,14 @@ import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from app.models import TickerData, PortfolioSummary
+from app.models import TickerData, PortfolioSummary, TiersPadi
 from config import PRIMARY_CURRENCY
 from app.portfolio.portfolio_metrics import (
     calculate_free_cash_by_currency, get_ibkr_free_cash, 
     get_cash_operations_summary, get_other_cash_operations_summary, 
     get_portfolio_dividends_per_year, get_portfolio_dividends_ltm,
     get_portfolio_dividends_per_quarter, get_portfolio_dividend_calendar,
-    check_portfolio_history_consistency
+    check_portfolio_history_consistency, get_portfolio_tier_padi_ratio
 )
 from utils.exchange_rate import normalize_currency, get_rate_from_cache
 from app.stock.stock_metrics import predict_dividend_income_calendar
@@ -116,6 +116,9 @@ def calculate_portfolio_summary(all_tickers_data: Dict[str, TickerData], transac
     # Convert tuple keys to string keys for JSON serialization
     quarterly_dividends = {f"Q{q}/{str(y)[-2:]}": amt for (y, q), amt in q_divs_raw.items()}
 
+    # Tiers PADI Calculation
+    tiers_padi = get_portfolio_tier_padi_ratio(all_tickers_data)
+
     return PortfolioSummary(
         total_contribution=net_capital_contributed,
         total_portfolio_profit_loss=total_portfolio_profit_loss,
@@ -147,7 +150,8 @@ def calculate_portfolio_summary(all_tickers_data: Dict[str, TickerData], transac
         total_free_cash_primary_currency=total_free_cash_primary,
         projected_dividend_income=projected_dividend_income,
         dividend_calendar=dividend_calendar,
-        quarterly_dividends=quarterly_dividends
+        quarterly_dividends=quarterly_dividends,
+        tiers_padi=tiers_padi
     )
 
 def calculate_portfolio_history(transactions_df: pd.DataFrame, dividends_df: pd.DataFrame, cash_operations_data: dict, market_data: dict, ticker_map_data: dict, all_tickers_data: Dict[str, TickerData], cached_history: List[Dict] = None, div_df: pd.DataFrame = None, month_ends: pd.DatetimeIndex = None, monthly_metrics: Dict = None, other_ops_df: pd.DataFrame = None) -> List[Dict]:

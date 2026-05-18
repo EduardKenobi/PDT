@@ -70,6 +70,43 @@ def print_portfolio_summary_rich(console: Console, portfolio_summary: Dict):
 
     console.print(perf_table)
     console.print(div_table)
+    print_tiers_summary_rich(console, portfolio_summary)
+
+def print_tiers_summary_rich(console: Console, portfolio_summary: Dict):
+    """
+    Prints the Tiers Summary table below Portfolio Dividends Metrics.
+    """
+    tiers_padi = portfolio_summary.get('tiers_padi')
+    if not tiers_padi:
+        return
+
+    table = Table(title="Tiers Summary", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table.add_column("Tier", style="cyan", no_wrap=True)
+    table.add_column("PADI", justify="right", style="white")
+    table.add_column("Ratio", justify="right", style="white")
+
+    # Data might be a dict if coming from JSON (which it is in reporter)
+    # TiersPadi structure: tier_1: (value, ratio)
+    
+    if isinstance(tiers_padi, dict):
+        t1 = tiers_padi.get('tier_1')
+        t2 = tiers_padi.get('tier_2')
+        t3 = tiers_padi.get('tier_3')
+        tg = tiers_padi.get('tier_g')
+        other = tiers_padi.get('other')
+        
+        if t1:
+            table.add_row("Tier 1", f"{t1[0]:.2f} {PRIMARY_CURRENCY}", f"{t1[1]:.2%}")
+        if t2:
+            table.add_row("Tier 2", f"{t2[0]:.2f} {PRIMARY_CURRENCY}", f"{t2[1]:.2%}")
+        if t3:
+            table.add_row("Tier 3", f"{t3[0]:.2f} {PRIMARY_CURRENCY}", f"{t3[1]:.2%}")
+        if tg:
+            table.add_row("Tier G", f"{tg[0]:.2f} {PRIMARY_CURRENCY}", f"{tg[1]:.2%}")
+        if other:
+            table.add_row("Other", f"{other[0]:.2f} {PRIMARY_CURRENCY}", f"{other[1]:.2%}")
+
+    console.print(table)
 
 def print_portfolio_history_rich(console: Console, portfolio_history: List[Dict]):
     """

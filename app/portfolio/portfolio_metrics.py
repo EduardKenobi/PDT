@@ -3,6 +3,7 @@ from datetime import datetime
 from collections import defaultdict
 from calendar import month_name
 
+from app.models import TiersPadi
 from utils.data_loader import load_yaml
 from config import PRIMARY_CURRENCY, CASH_OPERATIONS_OUTPUT_FILE, IBKR_CASH_BALANCE_OUTPUT_FILE
 from utils.exchange_rate import get_rate_from_cache, normalize_currency
@@ -247,3 +248,57 @@ def check_portfolio_history_consistency(month_ends: list[pd.Timestamp], monthly_
     else:
         print("      Inconsistent historical data. Starting portfolio history from scratch.")
     return history
+
+def get_portfolio_tier_padi_ratio(all_tickers_data: dict) -> TiersPadi:
+    """
+    Determines the portfolio tier PADI ratio based on the total PADI.
+    Returns a TiersPadi object containing total PADI and ratio for each tier.
+    
+    Args:
+        all_tickers_data (dict): The dictionary containing ticker data.
+    Returns:
+        TiersPadi: A TiersPadi object with metrics for each tier.
+    """
+    total_padi = sum(data.padi for data in all_tickers_data.values())
+    
+    tier_1_padi = sum(
+        data.padi for data in all_tickers_data.values() 
+        if data.tier_group == 'Tier 1'
+    ) 
+
+    tier_2_padi = sum(
+        data.padi for data in all_tickers_data.values() 
+        if data.tier_group == 'Tier 2'
+    )
+
+    tier_3_padi = sum(
+        data.padi for data in all_tickers_data.values() 
+        if data.tier_group == 'Tier 3'
+    )
+
+    tier_g_padi = sum(
+        data.padi for data in all_tickers_data.values() 
+        if data.tier_group == 'Tier G'
+    )
+
+    other_padi = sum(
+        data.padi for data in all_tickers_data.values() 
+        if data.tier_group not in ['Tier 1', 'Tier 2', 'Tier 3', 'Tier G']
+    )
+
+    if total_padi == 0:
+        return TiersPadi(
+            tier_1=(0.0, 0.0),
+            tier_2=(0.0, 0.0),
+            tier_3=(0.0, 0.0),
+            tier_g=(0.0, 0.0),
+            other=(0.0, 0.0)
+        )
+        
+    return TiersPadi(
+        tier_1=(tier_1_padi, tier_1_padi / total_padi),
+        tier_2=(tier_2_padi, tier_2_padi / total_padi),
+        tier_3=(tier_3_padi, tier_3_padi / total_padi),
+        tier_g=(tier_g_padi, tier_g_padi / total_padi),
+        other=(other_padi, other_padi / total_padi)
+    )

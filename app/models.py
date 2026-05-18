@@ -9,6 +9,14 @@ class DividendGrowthMetrics:
     cagr_10y: Optional[float] = None
 
 @dataclass
+class TiersPadi:
+    tier_1: Optional[tuple[float, Optional[float]]] = None
+    tier_2: Optional[tuple[float, Optional[float]]] = None
+    tier_3: Optional[tuple[float, Optional[float]]] = None
+    tier_g: Optional[tuple[float, Optional[float]]] = None
+    other: Optional[tuple[float, Optional[float]]] = None
+
+@dataclass
 class PositionData:
     date: str
     shares: float
@@ -115,3 +123,4 @@ class PortfolioSummary:
     projected_dividend_income: Optional[Dict[str, float]] = None
     dividend_calendar: Dict[str, List[str]] = field(default_factory=dict)
     quarterly_dividends: Dict[str, float] = field(default_factory=dict)
+    tiers_padi: Optional[TiersPadi] = None

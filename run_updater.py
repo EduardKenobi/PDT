@@ -22,6 +22,9 @@ def calculate_pe_metrics(symbol: str, financials: pd.DataFrame, ticker_df: pd.Da
     if financials.empty or ticker_df.empty:
         return {"pe_actual": None, "pe_avg_10y": None}
 
+    # Debug: Inspect index
+    # print(f"DEBUG: {symbol} financials index: {financials.index.tolist()}")
+
     try:
         # 1. Actual PE
         # Try to get from yfinance info if possible, but here we use financials
@@ -31,14 +34,21 @@ def calculate_pe_metrics(symbol: str, financials: pd.DataFrame, ticker_df: pd.Da
         elif 'Basic EPS' in financials.index:
             latest_eps = financials.loc['Basic EPS'].iloc[0]
         else:
-            # Calculate from Net Income and Shares
-            net_income = financials.loc['Net Income'].iloc[0] if 'Net Income' in financials.index else None
-            shares = financials.loc['Diluted Average Shares'].iloc[0] if 'Diluted Average Shares' in financials.index else financials.loc['Basic Average Shares'].iloc[0] if 'Basic Average Shares' in financials.index else None
-            latest_eps = net_income / shares if net_income and shares else None
+            # Check for alternative index names
+            possible_eps_indices = ['BasicEPS', 'DilutedEPS']
+            for idx in possible_eps_indices:
+                if idx in financials.index:
+                    latest_eps = financials.loc[idx].iloc[0]
+                    break
+            else:
+                # Calculate from Net Income and Shares
+                net_income = financials.loc['Net Income'].iloc[0] if 'Net Income' in financials.index else None
+                shares = financials.loc['Diluted Average Shares'].iloc[0] if 'Diluted Average Shares' in financials.index else financials.loc['Basic Average Shares'].iloc[0] if 'Basic Average Shares' in financials.index else None
+                latest_eps = net_income / shares if net_income and shares else None
 
         current_price = float(ticker_df['Close'].iloc[-1]) if not ticker_df.empty else None
         pe_actual = current_price / latest_eps if current_price and latest_eps and latest_eps > 0 else None
-
+        
         # 2. Average PE (Last 10 years)
         pe_history = []
         # yfinance financials usually gives 4 years, but let's take what we have

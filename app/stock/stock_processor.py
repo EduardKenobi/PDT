@@ -281,7 +281,12 @@ def calculate_ticker_metrics(ticker, transactions_df, dividends_df: pd.DataFrame
         # Decision Engine Flags
         # True only if current value is below average minus 10% safety margin
         yield_below_avg = div_yield > (avg_div_yield * (1 + SAFETY_MARGIN)) if avg_div_yield > 0 else False
+        
+        # Debugging the PE calculation
         pe_below_avg = pe_actual < (pe_avg_10y * (1 - SAFETY_MARGIN)) if pe_actual is not None and pe_avg_10y is not None else False
+        if ticker in ['ASML', 'ASML.AS', 'MSFT', 'AAPL']: # Add tickers as needed to check
+            print(f"DEBUG: {ticker} | pe_actual: {pe_actual} | pe_avg_10y: {pe_avg_10y} | SAFETY_MARGIN: {SAFETY_MARGIN} | pe_below_avg: {pe_below_avg}")
+            
         peg_below_threshold = peg_ratio < PEG_RATIO_THRESHOLD if peg_ratio is not None else False
         div_growth_above_inflation = is_div_growth_above_inflation(calculated_growth_metrics, INFLATION_RATE)
 
