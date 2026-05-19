@@ -78,11 +78,13 @@ def _get_history_metrics_at_date(date: pd.Timestamp, ref_str: str, transactions_
 
         if hist_dividends_data:
             try:
+                # Use the current historical 'date' as reference_date to correctly detect stopped dividends relative to history
                 forward_dividend_hist = calculate_forward_dividend(
                     ticker=ticker,
                     frequency_type=div_frequency_str,
                     dividends_history=hist_dividends_data,
-                    currency=price_currency
+                    currency=price_currency,
+                    reference_date=date # Key fix: make staleness check relative to historical point
                 )
                 
                 if forward_dividend_hist > 0:

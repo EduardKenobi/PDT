@@ -242,10 +242,25 @@ def main():
                 if t in open_tickers:
                     financials = financials_batch.get(t, pd.DataFrame())
                     pe_metrics = calculate_pe_metrics(t, financials, ticker_df)
+                    
+                    # Fallback 1: Try trailing_pe from info if calculated pe_actual is missing
+                    info_data = peg_info_batch.get(t, {})
+                    if pe_metrics.get('pe_actual') is None:
+                        pe_metrics['pe_actual'] = info_data.get('trailing_pe')
+                    
+                    # Fallback 2: Try previous cache for all PE/PEG metrics if still missing
+                    previous_dynamic = cache.get("tickers", {}).get(t, {}).get("dynamic", {})
+                    if pe_metrics.get('pe_actual') is None:
+                        pe_metrics['pe_actual'] = previous_dynamic.get('pe_actual')
+                    if pe_metrics.get('pe_avg_10y') is None:
+                        pe_metrics['pe_avg_10y'] = previous_dynamic.get('pe_avg_10y')
+                    
                     dynamic_data.update(pe_metrics)
                     
-                    # Add PEG ratio
-                    peg_val = peg_info_batch.get(t, {}).get('peg_ratio')
+                    # Add PEG ratio with fallback
+                    peg_val = info_data.get('peg_ratio')
+                    if peg_val is None:
+                        peg_val = previous_dynamic.get('peg_ratio')
                     dynamic_data['peg_ratio'] = peg_val
 
                 if t not in cache["tickers"]: cache["tickers"][t] = {}

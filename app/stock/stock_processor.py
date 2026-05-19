@@ -100,7 +100,7 @@ def process_open_positions(open_positions: pd.DataFrame, current_price: float, p
 
     return open_positions_details, gain_amount, total_cost_primary, market_value_primary, cost_by_currency
 
-def calculate_ticker_history(ticker: str, transactions_df: pd.DataFrame, div_df: pd.DataFrame, market_data: dict, ticker_map_data: dict, exchange_rate_cache: dict, cached_history: List[Dict] = None, month_ends: pd.DatetimeIndex = None) -> List[Dict]:
+def calculate_ticker_history(ticker: str, transactions_df: pd.DataFrame, div_df: pd.DataFrame, market_data: dict, ticker_map_data: dict, exchange_rate_cache: dict, cached_history: List[Dict] = None, month_ends: pd.DatetimeIndex = None, current_metrics: Dict = None) -> List[Dict]:
     """
     Calculates the historical performance for a single ticker.
     """
@@ -127,13 +127,20 @@ def calculate_ticker_history(ticker: str, transactions_df: pd.DataFrame, div_df:
             continue
 
         is_running_month = (i == len(month_ends) - 1)
-        ref_date = pd.Timestamp.now() if is_running_month else me
-        ref_str = ref_date.strftime('%Y-%m-%d')
-        is_recent_me = me >= (pd.Timestamp.now() - pd.DateOffset(days=45))
+        
+        if is_running_month and current_metrics:
+            # For the running month, use the accurately calculated current metrics to ensure consistency with summary
+            invested = current_metrics.get('invested', 0)
+            value = current_metrics.get('value', 0)
+            padi = current_metrics.get('padi', 0)
+        else:
+            ref_date = me
+            ref_str = ref_date.strftime('%Y-%m-%d')
+            is_recent_me = me >= (pd.Timestamp.now() - pd.DateOffset(days=45))
 
-        invested, value, padi = _get_history_metrics_at_date(
-            me, ref_str, ticker_transactions, div_df, market_data, ticker_map_data, exchange_rate_cache, is_recent_me
-        )
+            invested, value, padi = _get_history_metrics_at_date(
+                me, ref_str, ticker_transactions, div_df, market_data, ticker_map_data, exchange_rate_cache, is_recent_me
+            )
 
         history.append({
             'date': me_str,
@@ -312,7 +319,17 @@ def calculate_ticker_metrics(ticker, transactions_df, dividends_df: pd.DataFrame
     
     # Calculate ticker history
     cached_history = cached_ticker_data.get('history', []) if cached_ticker_data else []
-    ticker_history = calculate_ticker_history(ticker, transactions_df, div_df, market_data, ticker_map_data, exchange_rate_cache, cached_history, month_ends)
+    
+    # Pass current metrics to ensure history's running month matches summary
+    current_metrics = {
+        'invested': total_cost_primary,
+        'value': market_value_primary,
+        'padi': padi
+    }
+    ticker_history = calculate_ticker_history(
+        ticker, transactions_df, div_df, market_data, ticker_map_data, 
+        exchange_rate_cache, cached_history, month_ends, current_metrics
+    )
 
     return TickerData(
         ticker=ticker, current_shares=current_shares, has_open_position=has_open_position, market_value_primary=market_value_primary,

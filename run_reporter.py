@@ -535,7 +535,16 @@ def print_stock_summary_rich(console: Console, all_tickers_data: Dict[str, Dict]
         # Determine if owned or sold for header text
         is_owned = details['current_shares'] > 0
         display_name = f" - {details['name']}" if details.get('name') else ""
-        header_text = f"{details['ticker']}{display_name} ({'Owned' if is_owned else 'Sold'})"
+        
+        # Check for stopped dividends: frequency is set but paying flag is false
+        status_suffix = ""
+        if is_owned:
+            div_freq = details.get('div_frequency', 'N/A')
+            if div_freq != 'N/A' and not details.get('has_paying_dividend', False):
+                status_suffix = " [STOPPED DIVIDEND]"
+        
+        ownership_status = 'Owned' if is_owned else 'Sold'
+        header_text = f"{details['ticker']}{display_name} ({ownership_status}){status_suffix}"
         
         # Only print header if we are going to print tables
         # But we need to know if we have tables.

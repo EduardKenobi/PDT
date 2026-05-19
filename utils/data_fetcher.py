@@ -66,7 +66,8 @@ def get_ticker_info_batch(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
                 "industry": info.get("industry"),
                 "currency": info.get("currency"),
                 "forward_dividend": info.get("dividendRate") or info.get("forwardAnnualDividendRate") or 0.0,
-                "peg_ratio": info.get("pegRatio") or info.get("trailingPegRatio") or info.get("trailingPeg")
+                "peg_ratio": info.get("pegRatio") or info.get("trailingPegRatio") or info.get("trailingPeg"),
+                "trailing_pe": info.get("trailingPE")
             }
         except Exception as e:
             print(f"Warning: Could not fetch info for {symbol}: {e}")

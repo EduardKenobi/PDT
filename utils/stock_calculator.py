@@ -1,5 +1,9 @@
 import pandas as pd
+import logging
+from datetime import datetime
 from typing import Optional
+
+from config import DIVIDEND_FREQ_MAP
 
 def sum_shares(positions_df: pd.DataFrame) -> float:
     """Sums the 'shares' column of a given DataFrame.
@@ -71,7 +75,7 @@ def sum_realized_gains_per_currency(positions_df: pd.DataFrame) -> dict:
         return {}
 
     # Group by currency and sum the gross_pl_amount
-    gains_per_currency = positions_df.groupby('currency')['gross_pl_amount'].sum()
+    gains_per_currency = gains_per_currency = positions_df.groupby('currency')['gross_pl_amount'].sum()
     
     # Convert the result to a dictionary
     return gains_per_currency.to_dict()
@@ -82,9 +86,10 @@ def calculate_padi_value(shares: float, amount_per_share: Optional[float]) -> fl
         return shares * amount_per_share
     return 0.0
 
-def calculate_forward_dividend(ticker: str, frequency_type: str, dividends_history: list, currency: str = '') -> float:
+def calculate_forward_dividend(ticker: str, frequency_type: str, dividends_history: list, currency: str = '', reference_date: Optional[datetime] = None) -> float:
     """
     Calculates the forward dividend based on frequency type and historical dividend data.
+    Detects if a company stopped paying dividends using dynamic gap analysis.
     
     Args:
         ticker (str): The ticker symbol (for logging purposes).
@@ -95,28 +100,17 @@ def calculate_forward_dividend(ticker: str, frequency_type: str, dividends_histo
                                  Expected format: [{"date": "2024-01-15", "amount": 0.50}, ...]
         currency (str): The currency of the stock (e.g. 'USD', 'EUR', 'GBp'). 
                        Used to convert GBp (pence) to GBP (pounds) if necessary.
+        reference_date (datetime, optional): The date to calculate "forward" from. 
+                                            Defaults to datetime.now().
     
     Returns:
-        float: The calculated forward dividend, or 0.0 if calculation fails.
-    
-    Logic:
-        - Monthly & Quarterly-Regular: Last payment × Frequency
-        - Quarterly-Unregular & Semi-Annually: Sum of all payments in the last 365 days (TTM).
-          This is robust against timing shifts and merged payments. 
-          Falls back to last payment annualized if no payments in the last year.
-        - Annually: Last annual payment
+        float: The calculated forward dividend, or 0.0 if calculation fails or dividend is stopped.
     """
-    from config import DIVIDEND_FREQ_MAP
-    import logging
-    from datetime import datetime
-    import pandas as pd
-    
     # Validate inputs
     if not frequency_type or frequency_type == 'N/A':
         return 0.0
     
     if not dividends_history or len(dividends_history) == 0:
-        logging.warning(f"{ticker}: No dividend history available.")
         return 0.0
     
     # Get frequency multiplier
@@ -136,52 +130,80 @@ def calculate_forward_dividend(ticker: str, frequency_type: str, dividends_histo
                 consolidated[dt] = amt
         
         consolidated_history = [{"date": dt, "amount": amt} for dt, amt in consolidated.items()]
-        # Sort descending by date
         sorted_dividends = sorted(consolidated_history, key=lambda x: x['date'], reverse=True)
     except (KeyError, TypeError) as e:
         logging.error(f"{ticker}: Invalid dividend history format: {e}")
         return 0.0
+
+    if reference_date is None:
+        reference_date = datetime.now()
+
+    last_div_date = pd.to_datetime(sorted_dividends[0]['date'])
+    days_since_last_div = (reference_date - last_div_date).days
+
+    # --- SMARTER STALENESS DETECTION (Dynamic Max-Gap) ---
     
-    # Calculate based on frequency type
+    # 1. Define absolute floors for each frequency (safety net)
+    absolute_floors = {
+        'Monthly': 60,
+        'Quarterly-Regulary': 160,
+        'Quartely-Regulary': 160,
+        'Quarterly': 160,
+        'Quarterly-Unregulary': 200,
+        'Quartely-Unregulary': 200,
+        'Semi-Annually': 365, # Floor for semi-annual is 1 year
+        'Annually': 500
+    }
+    
+    limit = absolute_floors.get(frequency_type, 365)
+
+    # 2. Dynamic Pattern Analysis: Look at historical gaps between payments
+    if len(sorted_dividends) >= 3:
+        gaps = []
+        # Calculate gaps between consecutive dividends (descending order)
+        for i in range(len(sorted_dividends) - 1):
+            d1 = pd.to_datetime(sorted_dividends[i]['date'])
+            d2 = pd.to_datetime(sorted_dividends[i+1]['date'])
+            gaps.append((d1 - d2).days)
+        
+        if gaps:
+            # Threshold = Max historical gap + 90 days buffer
+            # This handles companies with irregular cycles (e.g. 9 month gap between interim and final)
+            limit = max(limit, max(gaps) + 90)
+
+    # 3. Apply Limit
+    if days_since_last_div > limit:
+        if (datetime.now() - reference_date).days < 1:
+            print(f"      [!] WARNING: {ticker} last dividend was {days_since_last_div} days ago. Limit is {limit} days. Assuming STOPPED.")
+        return 0.0
+    
+    # --- CALCULATION ---
     forward_div = 0.0
     try:
         if frequency_type in ['Monthly', 'Quarterly-Regulary', 'Quartely-Regulary', 'Quarterly']:
-            # Monthly & Quarterly-Regular: Last payment × Frequency
             last_payment = sorted_dividends[0]['amount']
             forward_div = last_payment * frequency
         
         elif frequency_type in ['Quarterly-Unregulary', 'Quartely-Unregulary', 'Semi-Annually']:
-            # Sum of all payments in the last 365 days (TTM)
-            today = datetime.now()
-            one_year_ago = today - pd.DateOffset(days=365)
-            
+            one_year_ago = reference_date - pd.DateOffset(days=365)
             ttm_sum = 0.0
             payments_found = 0
             for div in sorted_dividends:
                 div_date = pd.to_datetime(div['date'])
-                if div_date > one_year_ago and div_date <= today:
+                if div_date > one_year_ago and div_date <= reference_date:
                     ttm_sum += div['amount']
                     payments_found += 1
             
             if payments_found >= 1:
                 forward_div = ttm_sum
             else:
-                # Fallback: annualize the most recent payment
-                logging.warning(f"{ticker}: No payments in last 365 days. Annualizing last payment.")
                 last_payment = sorted_dividends[0]['amount']
                 forward_div = last_payment * frequency
         
         elif frequency_type == 'Annually':
-            # Annually: Last annual payment
-            last_payment = sorted_dividends[0]['amount']
-            forward_div = last_payment
-        
-        else:
-            logging.warning(f"{ticker}: Unhandled frequency type '{frequency_type}'.")
-            return 0.0
+            forward_div = sorted_dividends[0]['amount']
         
         # Handle GBp to GBP conversion
-        # Check for GBp/GBP/GBX and if value is likely in pence (> 50 is a safe heuristic for dividend amount)
         if currency in ['GBp', 'GBP', 'GBX'] and forward_div > 50:
             forward_div = forward_div / 100.0
             
@@ -194,4 +216,3 @@ def calculate_forward_dividend(ticker: str, frequency_type: str, dividends_histo
 def above_safety_margin(value: float, target: float, margin: float) -> bool:
     """Checks if a value is above a target considering a safety margin."""
     return value > (target * (1 - margin))
-
