@@ -302,3 +302,29 @@ def get_portfolio_tier_padi_ratio(all_tickers_data: dict) -> TiersPadi:
         tier_g=(tier_g_padi, tier_g_padi / total_padi),
         other=(other_padi, other_padi / total_padi)
     )
+
+def validate_padi_tier_ratios(all_tickers_data: dict) -> dict[str, bool]:
+    """
+    Validates if any ticker's PADI ratio within its tier group exceeds the defined threshold.
+    Returns a dictionary mapping tier names to a boolean (True if all tickers in that tier are within limits).
+    """
+    from config import PADI_TIER_THRESHOLDS
+
+    # Calculate total PADI per tier group
+    tier_totals = defaultdict(float)
+    for data in all_tickers_data.values():
+        if data.has_open_position:
+            tier_totals[data.tier_group] += data.padi
+
+    # Check thresholds
+    tier_status = {tier: True for tier in PADI_TIER_THRESHOLDS.keys()}
+    for data in all_tickers_data.values():
+        if data.has_open_position and data.tier_group in PADI_TIER_THRESHOLDS:
+            tier = data.tier_group
+            tier_total = tier_totals[tier]
+            if tier_total > 0:
+                ratio_within_tier = data.padi / tier_total
+                if ratio_within_tier > PADI_TIER_THRESHOLDS[tier]:
+                    tier_status[tier] = False
+
+    return tier_status

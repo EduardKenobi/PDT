@@ -691,6 +691,7 @@ def print_decision_engine_rich(console: Console, all_tickers_data: Dict[str, Dic
     table.add_column("PE < Avg", justify="center")
     table.add_column("DG > Infl", justify="center")
     table.add_column("PEG < 1", justify="center")
+    table.add_column("PADI OK", justify="center")
     
 
     owned_tickers = sorted([t for t, data in all_tickers_data.items() if data.get('current_shares', 0) > 0])
@@ -715,6 +716,7 @@ def print_decision_engine_rich(console: Console, all_tickers_data: Dict[str, Dic
         dg_5y_cagr = details.get('dividend_growth', {}).get('cagr_5y')
         peg_flag = details.get('peg_below_threshold', False)
         peg_ratio = details.get('peg_ratio')
+        padi_tier_flag = details.get('is_padi_ratio_within_tier_ok', False)
 
         def _format_flag(val):
             return "[green]T[/green]" if val else "[red]F[/red]"
@@ -734,7 +736,8 @@ def print_decision_engine_rich(console: Console, all_tickers_data: Dict[str, Dic
             _format_flag(dy_flag),
             _format_flag(pe_flag),
             _format_flag(dg_flag),
-            _format_flag(peg_flag)
+            _format_flag(peg_flag),
+            _format_flag(padi_tier_flag)
         )
 
     console.print(table)

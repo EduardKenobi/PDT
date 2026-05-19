@@ -9,7 +9,8 @@ from app.portfolio.portfolio_metrics import (
     get_cash_operations_summary, get_other_cash_operations_summary, 
     get_portfolio_dividends_per_year, get_portfolio_dividends_ltm,
     get_portfolio_dividends_per_quarter, get_portfolio_dividend_calendar,
-    check_portfolio_history_consistency, get_portfolio_tier_padi_ratio
+    check_portfolio_history_consistency, get_portfolio_tier_padi_ratio,
+    validate_padi_tier_ratios
 )
 from utils.exchange_rate import normalize_currency, get_rate_from_cache
 from app.stock.stock_metrics import predict_dividend_income_calendar
@@ -215,7 +216,7 @@ def calculate_portfolio_history(transactions_df: pd.DataFrame, dividends_df: pd.
 
 def enrich_ticker_data(all_tickers_data: Dict[str, TickerData], portfolio_summary: PortfolioSummary) -> Dict[str, TickerData]:
     """
-    Enrich each ticker's data with portfolio ratios.
+    Enrich each ticker's data with portfolio ratios and decision engine flags.
     """
     total_cost = portfolio_summary.portfolio_cost
     total_padi = portfolio_summary.padi
@@ -224,5 +225,11 @@ def enrich_ticker_data(all_tickers_data: Dict[str, TickerData], portfolio_summar
         data.ratio_on_cost = (data.cost_basis_primary_currency / total_cost) if total_cost > 0 else 0
         data.ratio_on_padi = (data.padi / total_padi) if total_padi > 0 else 0
         data.ratio_on_market_value = (data.market_value_primary / total_market_value) if total_market_value > 0 else 0
+
+    # 2. PADI Ratio within Tier Group validation
+    tier_status = validate_padi_tier_ratios(all_tickers_data)
+    for data in all_tickers_data.values():
+        if data.has_open_position:
+            data.is_padi_ratio_within_tier_ok = tier_status.get(data.tier_group, True)
 
     return all_tickers_data

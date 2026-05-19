@@ -112,6 +112,14 @@ SAFETY_MARGIN = 0.10  # 10% safety margin for all tiers
 INFLATION_RATE = 0.035  # Inflation rate for decision engine (3.5%)
 PEG_RATIO_THRESHOLD = 1.0  # PEG ratio threshold for growth evaluation
 
+# --- PADI Decision Engine Thresholds ---
+PADI_TIER_THRESHOLDS = {
+    "Tier 1": 0.25,
+    "Tier 2": 0.65,
+    "Tier 3": 0.1,
+    "Tier G": 0.00
+}
+
 ANALYSIS_MAP = {
     TIER1: {
         'name': 'Tier 1 - Core Holdings',

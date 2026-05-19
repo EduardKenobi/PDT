@@ -79,6 +79,7 @@ class TickerData:
     pe_below_avg: bool = False
     peg_below_threshold: bool = False
     div_growth_above_inflation: bool = False
+    is_padi_ratio_within_tier_ok: bool = False
     ratio_on_cost: float = 0.0
     ratio_on_padi: float = 0.0
     ratio_on_market_value: float = 0.0
