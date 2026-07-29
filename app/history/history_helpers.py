@@ -78,7 +78,6 @@ def _get_history_metrics_at_date(date: pd.Timestamp, ref_str: str, transactions_
 
         if hist_dividends_data:
             try:
-                # Use the current historical 'date' as reference_date to correctly detect stopped dividends relative to history
                 forward_dividend_hist = calculate_forward_dividend(
                     ticker=ticker,
                     frequency_type=div_frequency_str,
@@ -87,6 +86,17 @@ def _get_history_metrics_at_date(date: pd.Timestamp, ref_str: str, transactions_
                     reference_date=date # Key fix: make staleness check relative to historical point
                 )
                 
+                is_div_suspended = False
+                div_suspended_val = ticker_map_data.get('ticker_info', {}).get(ticker, {}).get('div_suspended', False)
+                if isinstance(div_suspended_val, str):
+                    ref_ts = pd.to_datetime(date).tz_localize(None)
+                    is_div_suspended = (ref_ts >= pd.to_datetime(div_suspended_val).tz_localize(None))
+                elif isinstance(div_suspended_val, bool):
+                    is_div_suspended = div_suspended_val
+                
+                if is_div_suspended:
+                    forward_dividend_hist = 0.0
+
                 if forward_dividend_hist > 0:
                     padi_hist = calculate_padi_value(shares, forward_dividend_hist)
                     padi_at_date += convert_currency(padi_hist, price_currency, PRIMARY_CURRENCY, ref_str, exchange_rate_cache, get_rate_from_cache)

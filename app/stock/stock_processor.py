@@ -247,6 +247,16 @@ def calculate_ticker_metrics(ticker, transactions_df, dividends_df: pd.DataFrame
             currency=price_currency
         )
 
+        is_div_suspended = False
+        div_suspended_val = ticker_map_data.get('ticker_info', {}).get(ticker, {}).get('div_suspended', False)
+        if isinstance(div_suspended_val, str):
+            is_div_suspended = (pd.Timestamp.now().normalize() >= pd.to_datetime(div_suspended_val).tz_localize(None))
+        elif isinstance(div_suspended_val, bool):
+            is_div_suspended = div_suspended_val
+
+        if is_div_suspended:
+            forward_dividend = 0.0
+
         # Process open positions with caching where possible
         open_positions_details, gain_amount, total_cost_primary, market_value_primary, cost_by_currency = \
             process_open_positions(open_positions, current_price, price_currency, exchange_rate_cache)

@@ -128,7 +128,7 @@ def _extract_ticker_from_description(description: str) -> str | None:
     """
     if not isinstance(description, str):
         return None
-    match = re.search(r'^([A-Z0-9\s]+?)\(', description)
+    match = re.search(r'^([A-Z0-9\s\.]+?)\(', description)
     if match:
         return match.group(1).strip()
     return None
@@ -212,7 +212,7 @@ def _parse_dividends_and_withholding(csv_content: str, instrument_info_map: dict
                             }
                             
                             # Peek for withholding tax matching this dividend
-                            for j in range(i + 1, min(i + 15, len(rows))):
+                            for j in range(i + 1, len(rows)):
                                 next_row = rows[j]
                                 if len(next_row) > 5 and next_row[0].strip() == 'Withholding Tax' and next_row[1].strip() == 'Data':
                                     # Ensure next_row is not an accrual or total

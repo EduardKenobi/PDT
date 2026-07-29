@@ -3,6 +3,7 @@ import os
 # --- Base Paths ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
+LOG_DIR = os.path.join(BASE_DIR, 'logs')
 
 # --- App-specific Configurations ---
 PRIMARY_CURRENCY = 'EUR'
@@ -76,7 +77,11 @@ XTB_SPECIAL_TICKER_MAP = {
 }
 
 IBKR_TICKER_CACHE_PATH = os.path.join(DATA_DIR, 'ibkr_ticker_cache.json')
-IBKR_SPECIAL_TICKER_MAP = {}
+IBKR_SPECIAL_TICKER_MAP = {
+    'WKL.DRRTS': 'WKL.AS',
+    'ULVRl': 'ULVR.L',
+    'EVOG.ST': 'EVO.ST',
+}
 IBKR_EXCHANGE_MAP = {
     'NASDAQ': '',
     'NYSE': '',

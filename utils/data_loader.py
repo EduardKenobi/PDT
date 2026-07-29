@@ -229,7 +229,8 @@ def _prepare_dividend_history_df(dividends_data: dict) -> pd.DataFrame:
                     'amount': div.get('amount', 0),
                     'currency': normalize_currency(div.get('currency')),
                     'amount_per_share': div.get('amount_per_share'),
-                    'amount_per_share_currency': normalize_currency(div.get('amount_per_share_currency'))
+                    'amount_per_share_currency': normalize_currency(div.get('amount_per_share_currency')),
+                    'withholding_tax': div.get('withholding_tax', 0)
                 })
     div_df = pd.DataFrame(all_dividends)
     if not div_df.empty:
