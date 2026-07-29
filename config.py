@@ -21,8 +21,8 @@ CHOICE_RUN_TAXER = 'Run Taxer'
 
 # --- Input Files ---
 # XTB
-EUR_ACCOUNT_FILE = os.path.join(DATA_DIR, 'account_1931741.xlsx')
-USD_ACCOUNT_FILE = os.path.join(DATA_DIR, 'account_50557805.xlsx')
+EUR_ACCOUNT_FILE = os.path.join(DATA_DIR, 'EUR_1931741_2006-01-01_2026-07-29.xlsx')
+USD_ACCOUNT_FILE = os.path.join(DATA_DIR, 'USD_50557805_2006-01-01_2026-07-29.xlsx')
 XTB_ACCOUNTS = [EUR_ACCOUNT_FILE, USD_ACCOUNT_FILE]
 
 # IBKR (Please update the filename to match your CSV export)

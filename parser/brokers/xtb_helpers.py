@@ -25,13 +25,20 @@ def parse_excel(input_path, sheet_name):
         # Use openpyxl to find the true number of rows
         workbook = openpyxl.load_workbook(input_path, read_only=True)
         if sheet_name not in workbook.sheetnames:
+            workbook.close()
             raise ValueError(f"Sheet '{sheet_name}' not found in the Excel file.")
         
         sheet = workbook[sheet_name]
         max_row = sheet.max_row
+        workbook.close()
 
         # Now, use pandas to read the exact number of rows
-        df = pd.read_excel(input_path, sheet_name=sheet_name, header=None, nrows=max_row)
+        # In new XTB reports, max_row can return 1 due to dimension issues in openpyxl read-only mode.
+        # If max_row is None or <= 1, we read the entire sheet without nrows constraint.
+        if max_row is not None and max_row > 1:
+            df = pd.read_excel(input_path, sheet_name=sheet_name, header=None, nrows=max_row)
+        else:
+            df = pd.read_excel(input_path, sheet_name=sheet_name, header=None)
         return df
 
     except FileNotFoundError:
